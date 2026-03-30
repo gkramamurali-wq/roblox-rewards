@@ -32,6 +32,25 @@ const rewardsCatalog = {
   ],
 }
 
+const baseGame = {
+  laneCount: 3,
+  position: { x: 0, lane: 1 },
+  finishX: 8,
+  obstacles: [
+    { id: 'o1', x: 2, lane: 0, kind: 'block' },
+    { id: 'o2', x: 4, lane: 1, kind: 'slime' },
+    { id: 'o3', x: 6, lane: 2, kind: 'block' },
+    { id: 'o4', x: 7, lane: 1, kind: 'slime' },
+  ],
+  coins: [
+    { id: 'c1', x: 1, lane: 1, collected: false },
+    { id: 'c2', x: 3, lane: 2, collected: false },
+    { id: 'c3', x: 5, lane: 0, collected: false },
+    { id: 'c4', x: 7, lane: 2, collected: false },
+  ],
+  steps: 0,
+}
+
 const defaultState = {
   profile: {
     name: 'Aarav',
@@ -70,14 +89,16 @@ const defaultState = {
   activePuzzleSet: 'math',
   currentPuzzle: null,
   lastResult: null,
-  gamePosition: 0,
   recentRewards: [],
+  game: structuredClone(baseGame),
 }
 
 let state = loadState()
 ensurePuzzle()
+normalizeGameState()
 
 const app = document.querySelector('#app')
+let keyboardBound = false
 
 function cloneDefaultState() {
   return JSON.parse(JSON.stringify(defaultState))
@@ -100,6 +121,11 @@ function loadState() {
       quests: Array.isArray(parsed.quests) ? parsed.quests : base.quests,
       unlockedItems: Array.isArray(parsed.unlockedItems) ? parsed.unlockedItems : base.unlockedItems,
       recentRewards: Array.isArray(parsed.recentRewards) ? parsed.recentRewards : [],
+      game: {
+        ...structuredClone(baseGame),
+        ...(parsed.game || {}),
+        position: { ...structuredClone(baseGame).position, ...(parsed.game?.position || {}) },
+      },
     }
   } catch {
     return base
@@ -282,6 +308,18 @@ function ensurePuzzle() {
   state.currentPuzzle = state.activePuzzleSet === 'math' ? createMathPuzzle() : createEnglishPuzzle()
 }
 
+function normalizeGameState() {
+  state.game = {
+    ...structuredClone(baseGame),
+    ...(state.game || {}),
+    position: { ...structuredClone(baseGame).position, ...(state.game?.position || {}) },
+  }
+}
+
+function resetMiniGame() {
+  state.game = structuredClone(baseGame)
+}
+
 function setTab(tab) {
   state.activeTab = tab
   if (tab === 'puzzles') ensurePuzzle()
@@ -352,7 +390,7 @@ function answerPuzzle(option) {
     state.profile.correctAnswers += 1
     awardReward(puzzle.reward, puzzle.type === 'math' ? 'Math win' : 'English win')
     updateQuestProgress(puzzle.type, 1)
-    state.lastResult = `Correct! Great job — you earned rewards.`
+    state.lastResult = 'Correct! Great job — you earned rewards.'
     state.currentPuzzle = puzzle.type === 'math' ? createMathPuzzle() : createEnglishPuzzle()
   } else {
     state.lastResult = `Not quite. Hint: ${puzzle.hint}`
@@ -362,21 +400,86 @@ function answerPuzzle(option) {
   render()
 }
 
-function movePlayer() {
-  state.gamePosition = Math.min(100, state.gamePosition + rand(10, 18))
-  updateQuestProgress('play', rand(10, 18))
+function collectCoinIfPresent() {
+  const coin = state.game.coins.find(
+    (entry) => !entry.collected && entry.x === state.game.position.x && entry.lane === state.game.position.lane,
+  )
 
-  if (state.gamePosition >= 100) {
-    const reward = { coins: 14, stars: 10, xp: 16, gems: Math.random() > 0.75 ? 1 : 0 }
-    awardReward(reward, 'Adventure complete')
-    state.gamePosition = 0
-    state.lastResult = 'You reached the treasure! Bonus rewards unlocked.'
-  } else {
-    state.lastResult = 'Nice jump! Keep going to the treasure chest.'
+  if (!coin) return
+
+  coin.collected = true
+  awardReward({ coins: 4, stars: 1, xp: 3, gems: 0 }, 'Coin collected')
+  state.lastResult = 'You grabbed a coin!'
+}
+
+function hitObstacle() {
+  return state.game.obstacles.some(
+    (entry) => entry.x === state.game.position.x && entry.lane === state.game.position.lane,
+  )
+}
+
+function checkFinish() {
+  if (state.game.position.x < state.game.finishX) return
+
+  const collectedCoins = state.game.coins.filter((coin) => coin.collected).length
+  const reward = {
+    coins: 10 + collectedCoins * 3,
+    stars: 8 + collectedCoins,
+    xp: 16 + collectedCoins * 2,
+    gems: collectedCoins >= 3 ? 1 : 0,
   }
 
+  awardReward(reward, 'Adventure complete')
+  updateQuestProgress('play', 100)
+  state.lastResult = `Treasure reached! You collected ${collectedCoins} coins on the path.`
+  resetMiniGame()
+}
+
+function movePlayer(deltaX, deltaLane = 0) {
+  const nextLane = Math.max(0, Math.min(state.game.laneCount - 1, state.game.position.lane + deltaLane))
+  const nextX = Math.max(0, Math.min(state.game.finishX, state.game.position.x + deltaX))
+
+  state.game.position = { x: nextX, lane: nextLane }
+  state.game.steps += 1
+
+  if (hitObstacle()) {
+    state.lastResult = 'Oops! You bumped into an obstacle. Back to the start.'
+    resetMiniGame()
+    saveState()
+    render()
+    return
+  }
+
+  collectCoinIfPresent()
+  if (!state.lastResult) state.lastResult = 'Nice move!'
+  checkFinish()
   saveState()
   render()
+}
+
+function bindKeyboardControls() {
+  if (keyboardBound) return
+  keyboardBound = true
+
+  window.addEventListener('keydown', (event) => {
+    if (state.activeTab !== 'play') return
+    if (['ArrowRight', 'd', 'D'].includes(event.key)) {
+      event.preventDefault()
+      movePlayer(1, 0)
+    }
+    if (['ArrowUp', 'w', 'W'].includes(event.key)) {
+      event.preventDefault()
+      movePlayer(1, -1)
+    }
+    if (['ArrowDown', 's', 'S'].includes(event.key)) {
+      event.preventDefault()
+      movePlayer(1, 1)
+    }
+    if (event.key === ' ') {
+      event.preventDefault()
+      movePlayer(2, 0)
+    }
+  })
 }
 
 function purchaseItem(item) {
@@ -411,6 +514,7 @@ function equipItem(type, itemId) {
 function resetProgress() {
   state = cloneDefaultState()
   ensurePuzzle()
+  normalizeGameState()
   saveState()
   render()
 }
@@ -514,24 +618,70 @@ function renderHome() {
   `
 }
 
+function renderBoardCell(x, lane) {
+  const playerHere = state.game.position.x === x && state.game.position.lane === lane
+  const obstacle = state.game.obstacles.find((entry) => entry.x === x && entry.lane === lane)
+  const coin = state.game.coins.find((entry) => entry.x === x && entry.lane === lane && !entry.collected)
+  const finishHere = x === state.game.finishX && lane === 1
+
+  let content = ''
+  let className = 'board-cell'
+
+  if (finishHere) {
+    content = '🏆'
+    className += ' finish'
+  }
+  if (obstacle) {
+    content = obstacle.kind === 'slime' ? '🟪' : '🧱'
+    className += ' obstacle'
+  }
+  if (coin) {
+    content = '🪙'
+    className += ' coin'
+  }
+  if (playerHere) {
+    content = findItemById(state.equipped.skin)?.icon || '🧍'
+    className += ' player-cell'
+  }
+
+  return `<div class="${className}">${content}</div>`
+}
+
 function renderPlay() {
+  const collectedCoins = state.game.coins.filter((coin) => coin.collected).length
+
   return `
     <section class="card play-panel">
-      <div class="section-heading">
+      <div class="section-heading wrap">
         <div>
           <p class="eyebrow">Mini adventure</p>
           <h2>Sky Path Dash</h2>
         </div>
-        <button class="primary" id="move-player">Jump Forward</button>
+        <button class="secondary" id="reset-mini-game">Reset Run</button>
       </div>
-      <p>Hop across the floating path and reach the treasure chest. Every run gives bonus rewards.</p>
-      <div class="game-lane">
-        <div class="lane-bg"></div>
-        <div class="player" style="left: calc(${state.gamePosition}% - 24px)">${findItemById(state.equipped.skin)?.icon || '🧍'}</div>
-        <div class="goal">🏆</div>
+      <p>Move across the path, collect coins, avoid blocks and slime, and reach the trophy.</p>
+      <div class="controls-note">Use buttons, tap controls, or keyboard: Right / Up / Down / Space</div>
+
+      <div class="game-status-row">
+        <div class="status-pill">Position: ${state.game.position.x}/${state.game.finishX}</div>
+        <div class="status-pill">Lane: ${state.game.position.lane + 1}</div>
+        <div class="status-pill">Coins grabbed: ${collectedCoins}/${state.game.coins.length}</div>
       </div>
-      <div class="progress-track"><div class="progress-fill" style="width:${state.gamePosition}%"></div></div>
-      <div class="obstacles"><span>☁️</span><span>🟨</span><span>🌟</span><span>🟪</span><span>🎁</span></div>
+
+      <div class="board-wrap">
+        <div class="board-grid" style="grid-template-columns: repeat(${state.game.finishX + 1}, minmax(52px, 1fr));">
+          ${Array.from({ length: state.game.laneCount }, (_, lane) =>
+            Array.from({ length: state.game.finishX + 1 }, (_, x) => renderBoardCell(x, lane)).join(''),
+          ).join('')}
+        </div>
+      </div>
+
+      <div class="play-controls">
+        <button class="secondary control-btn" data-move="up">↗ Jump Up</button>
+        <button class="primary control-btn" data-move="right">➡ Move Right</button>
+        <button class="secondary control-btn" data-move="down">↘ Jump Down</button>
+        <button class="secondary control-btn" data-move="boost">⏩ Dash</button>
+      </div>
     </section>
   `
 }
@@ -678,6 +828,7 @@ function render() {
   `
 
   bindEvents()
+  bindKeyboardControls()
 }
 
 function bindEvents() {
@@ -703,7 +854,22 @@ function bindEvents() {
     button.addEventListener('click', () => answerPuzzle(button.dataset.answer))
   })
 
-  document.getElementById('move-player')?.addEventListener('click', movePlayer)
+  document.querySelectorAll('[data-move]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const move = button.dataset.move
+      if (move === 'right') movePlayer(1, 0)
+      if (move === 'up') movePlayer(1, -1)
+      if (move === 'down') movePlayer(1, 1)
+      if (move === 'boost') movePlayer(2, 0)
+    })
+  })
+
+  document.getElementById('reset-mini-game')?.addEventListener('click', () => {
+    resetMiniGame()
+    state.lastResult = 'Adventure reset!'
+    saveState()
+    render()
+  })
 
   document.querySelectorAll('[data-buy-item]').forEach((button) => {
     button.addEventListener('click', () => {
