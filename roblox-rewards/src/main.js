@@ -1,6 +1,7 @@
 import './style.css'
 
-const STORAGE_KEY = 'roblox-rewards-save-v1'
+const STORAGE_KEY = 'roblox-rewards-save-v3'
+const ADMIN_PASSCODE = '1234'
 
 const rewardsCatalog = {
   hats: [
@@ -51,51 +52,66 @@ const baseGame = {
   steps: 0,
 }
 
+function createDefaultChildProfile(name = 'New Player', age = 8, difficulty = 'easy') {
+  return {
+    id: `child-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    status: 'active',
+    banReason: '',
+    profile: {
+      level: 1,
+      stars: 0,
+      coins: 25,
+      gems: 0,
+      xp: 0,
+      nextLevelXp: 100,
+      streak: 1,
+      correctAnswers: 0,
+      totalAnswers: 0,
+    },
+    settings: {
+      age,
+      difficulty,
+      sound: true,
+      safeLocalMode: true,
+      timeLimit: 20,
+    },
+    quests: [
+      { id: 'math', title: 'Solve 3 math puzzles', progress: 0, total: 3, reward: { coins: 10 } },
+      { id: 'english', title: 'Finish 2 word challenges', progress: 0, total: 2, reward: { gems: 1 } },
+      { id: 'play', title: 'Cross the sky path', progress: 0, total: 100, reward: { stars: 8 } },
+    ],
+    unlockedItems: ['hat-sun'],
+    equipped: {
+      hat: 'hat-sun',
+      glasses: null,
+      pet: null,
+      trail: null,
+      outfit: null,
+      skin: null,
+    },
+    currentPuzzle: null,
+    recentRewards: [],
+    game: structuredClone(baseGame),
+  }
+}
+
 const defaultState = {
-  profile: {
-    name: 'Aarav',
-    level: 1,
-    stars: 0,
-    coins: 25,
-    gems: 0,
-    xp: 0,
-    nextLevelXp: 100,
-    streak: 1,
-    correctAnswers: 0,
-    totalAnswers: 0,
-  },
-  settings: {
-    age: 8,
-    difficulty: 'easy',
-    sound: true,
-    safeLocalMode: true,
-    timeLimit: 20,
-  },
-  quests: [
-    { id: 'math', title: 'Solve 3 math puzzles', progress: 0, total: 3, reward: { coins: 10 } },
-    { id: 'english', title: 'Finish 2 word challenges', progress: 0, total: 2, reward: { gems: 1 } },
-    { id: 'play', title: 'Cross the sky path', progress: 0, total: 100, reward: { stars: 8 } },
-  ],
-  unlockedItems: ['hat-sun'],
-  equipped: {
-    hat: 'hat-sun',
-    glasses: null,
-    pet: null,
-    trail: null,
-    outfit: null,
-    skin: null,
-  },
   activeTab: 'home',
   activePuzzleSet: 'math',
-  currentPuzzle: null,
+  currentChildId: null,
   lastResult: null,
-  recentRewards: [],
-  game: structuredClone(baseGame),
+  admin: {
+    unlocked: false,
+    showPanel: false,
+  },
+  childProfiles: [],
 }
 
 let state = loadState()
+ensureCurrentChild()
 ensurePuzzle()
-normalizeGameState()
+normalizeCurrentChild()
 
 const app = document.querySelector('#app')
 let keyboardBound = false
@@ -115,17 +131,8 @@ function loadState() {
     return {
       ...base,
       ...parsed,
-      profile: { ...base.profile, ...(parsed.profile || {}) },
-      settings: { ...base.settings, ...(parsed.settings || {}) },
-      equipped: { ...base.equipped, ...(parsed.equipped || {}) },
-      quests: Array.isArray(parsed.quests) ? parsed.quests : base.quests,
-      unlockedItems: Array.isArray(parsed.unlockedItems) ? parsed.unlockedItems : base.unlockedItems,
-      recentRewards: Array.isArray(parsed.recentRewards) ? parsed.recentRewards : [],
-      game: {
-        ...structuredClone(baseGame),
-        ...(parsed.game || {}),
-        position: { ...structuredClone(baseGame).position, ...(parsed.game?.position || {}) },
-      },
+      admin: { ...base.admin, ...(parsed.admin || {}) },
+      childProfiles: Array.isArray(parsed.childProfiles) ? parsed.childProfiles : [],
     }
   } catch {
     return base
@@ -134,6 +141,76 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+}
+
+function ensureCurrentChild() {
+  if (!state.currentChildId || !state.childProfiles.find((child) => child.id === state.currentChildId)) {
+    state.currentChildId = state.childProfiles.find((child) => child.status !== 'banned')?.id || state.childProfiles[0]?.id || null
+  }
+}
+
+function getCurrentChild() {
+  return state.childProfiles.find((child) => child.id === state.currentChildId) || null
+}
+
+function childIsLocked(child) {
+  return child?.status === 'locked'
+}
+
+function childIsBanned(child) {
+  return child?.status === 'banned'
+}
+
+function childIsRestricted(child) {
+  return childIsLocked(child) || childIsBanned(child)
+}
+
+function normalizeCurrentChild() {
+  const child = getCurrentChild()
+  if (!child) return
+
+  child.settings = {
+    age: 8,
+    difficulty: 'easy',
+    sound: true,
+    safeLocalMode: true,
+    timeLimit: 20,
+    ...(child.settings || {}),
+  }
+
+  child.profile = {
+    level: 1,
+    stars: 0,
+    coins: 25,
+    gems: 0,
+    xp: 0,
+    nextLevelXp: 100,
+    streak: 1,
+    correctAnswers: 0,
+    totalAnswers: 0,
+    ...(child.profile || {}),
+  }
+
+  child.equipped = {
+    hat: 'hat-sun',
+    glasses: null,
+    pet: null,
+    trail: null,
+    outfit: null,
+    skin: null,
+    ...(child.equipped || {}),
+  }
+
+  child.status = child.status || 'active'
+  child.banReason = child.banReason || ''
+  child.quests = Array.isArray(child.quests) ? child.quests : createDefaultChildProfile().quests
+  child.unlockedItems = Array.isArray(child.unlockedItems) ? child.unlockedItems : ['hat-sun']
+  child.recentRewards = Array.isArray(child.recentRewards) ? child.recentRewards : []
+  child.game = {
+    ...structuredClone(baseGame),
+    ...(child.game || {}),
+    position: { ...structuredClone(baseGame).position, ...(child.game?.position || {}) },
+  }
 }
 
 function rand(min, max) {
@@ -145,18 +222,20 @@ function sample(list) {
 }
 
 function getDifficultyMultiplier() {
-  return { easy: 1, medium: 1.4, hard: 1.8 }[state.settings.difficulty] || 1
+  const child = getCurrentChild()
+  return { easy: 1, medium: 1.4, hard: 1.8 }[child?.settings?.difficulty] || 1
 }
 
 function getAgeBand() {
-  if (state.settings.age <= 7) return 'young'
-  if (state.settings.age <= 9) return 'core'
+  const age = getCurrentChild()?.settings?.age || 8
+  if (age <= 7) return 'young'
+  if (age <= 9) return 'core'
   return 'advanced'
 }
 
 function createMathPuzzle() {
   const band = getAgeBand()
-  const difficulty = state.settings.difficulty
+  const difficulty = getCurrentChild()?.settings?.difficulty || 'easy'
 
   let a = 0
   let b = 0
@@ -229,7 +308,7 @@ function createMathPuzzle() {
 
 function createEnglishPuzzle() {
   const band = getAgeBand()
-  const difficulty = state.settings.difficulty
+  const difficulty = getCurrentChild()?.settings?.difficulty || 'easy'
 
   const synonymPool = [
     { prompt: 'Pick the word that means happy', answer: 'glad', options: ['sad', 'glad', 'sleepy', 'tiny'] },
@@ -304,20 +383,16 @@ function shuffle(list) {
 }
 
 function ensurePuzzle() {
-  if (state.currentPuzzle?.type === state.activePuzzleSet) return
-  state.currentPuzzle = state.activePuzzleSet === 'math' ? createMathPuzzle() : createEnglishPuzzle()
-}
-
-function normalizeGameState() {
-  state.game = {
-    ...structuredClone(baseGame),
-    ...(state.game || {}),
-    position: { ...structuredClone(baseGame).position, ...(state.game?.position || {}) },
-  }
+  const child = getCurrentChild()
+  if (!child) return
+  if (child.currentPuzzle?.type === state.activePuzzleSet) return
+  child.currentPuzzle = state.activePuzzleSet === 'math' ? createMathPuzzle() : createEnglishPuzzle()
 }
 
 function resetMiniGame() {
-  state.game = structuredClone(baseGame)
+  const child = getCurrentChild()
+  if (!child) return
+  child.game = structuredClone(baseGame)
 }
 
 function setTab(tab) {
@@ -331,7 +406,7 @@ function progressPercent(value, total) {
 }
 
 function isUnlocked(itemId) {
-  return state.unlockedItems.includes(itemId)
+  return getCurrentChild()?.unlockedItems.includes(itemId)
 }
 
 function findItemById(itemId) {
@@ -343,55 +418,65 @@ function categoryToEquipType(category) {
 }
 
 function addRecentReward(text) {
-  state.recentRewards = [text, ...state.recentRewards].slice(0, 5)
+  const child = getCurrentChild()
+  if (!child) return
+  child.recentRewards = [text, ...child.recentRewards].slice(0, 5)
 }
 
 function awardReward(reward, sourceLabel) {
-  state.profile.coins += reward.coins || 0
-  state.profile.stars += reward.stars || 0
-  state.profile.gems += reward.gems || 0
-  state.profile.xp += reward.xp || 0
+  const child = getCurrentChild()
+  if (!child) return
+
+  child.profile.coins += reward.coins || 0
+  child.profile.stars += reward.stars || 0
+  child.profile.gems += reward.gems || 0
+  child.profile.xp += reward.xp || 0
 
   addRecentReward(`${sourceLabel}: +${reward.coins || 0} coins, +${reward.stars || 0} stars, +${reward.xp || 0} XP${reward.gems ? `, +${reward.gems} gem` : ''}`)
 
-  while (state.profile.xp >= state.profile.nextLevelXp) {
-    state.profile.xp -= state.profile.nextLevelXp
-    state.profile.level += 1
-    state.profile.nextLevelXp += 25
-    state.profile.coins += 15
-    state.profile.stars += 5
+  while (child.profile.xp >= child.profile.nextLevelXp) {
+    child.profile.xp -= child.profile.nextLevelXp
+    child.profile.level += 1
+    child.profile.nextLevelXp += 25
+    child.profile.coins += 15
+    child.profile.stars += 5
     addRecentReward('Level up bonus: +15 coins, +5 stars')
   }
 }
 
 function completeQuestIfReady(questId) {
-  const quest = state.quests.find((entry) => entry.id === questId)
-  if (!quest || quest.progress !== quest.total) return
-  if (quest.completed) return
+  const child = getCurrentChild()
+  if (!child) return
+  const quest = child.quests.find((entry) => entry.id === questId)
+  if (!quest || quest.progress !== quest.total || quest.completed) return
 
   quest.completed = true
   awardReward({ coins: quest.reward.coins || 0, stars: quest.reward.stars || 0, gems: quest.reward.gems || 0, xp: 12 }, `Quest complete: ${quest.title}`)
 }
 
 function updateQuestProgress(questId, amount) {
-  const quest = state.quests.find((entry) => entry.id === questId)
+  const child = getCurrentChild()
+  if (!child) return
+  const quest = child.quests.find((entry) => entry.id === questId)
   if (!quest) return
   quest.progress = Math.min(quest.total, quest.progress + amount)
   completeQuestIfReady(questId)
 }
 
 function answerPuzzle(option) {
+  const child = getCurrentChild()
+  if (!child || childIsRestricted(child)) return
   ensurePuzzle()
-  const puzzle = state.currentPuzzle
+  const puzzle = child.currentPuzzle
   const correct = option === puzzle.answer
-  state.profile.totalAnswers += 1
+  child.profile.totalAnswers += 1
 
   if (correct) {
-    state.profile.correctAnswers += 1
+    child.profile.correctAnswers += 1
     awardReward(puzzle.reward, puzzle.type === 'math' ? 'Math win' : 'English win')
     updateQuestProgress(puzzle.type, 1)
     state.lastResult = 'Correct! Great job — you earned rewards.'
-    state.currentPuzzle = puzzle.type === 'math' ? createMathPuzzle() : createEnglishPuzzle()
+    child.currentPuzzle = puzzle.type === 'math' ? createMathPuzzle() : createEnglishPuzzle()
   } else {
     state.lastResult = `Not quite. Hint: ${puzzle.hint}`
   }
@@ -401,8 +486,11 @@ function answerPuzzle(option) {
 }
 
 function collectCoinIfPresent() {
-  const coin = state.game.coins.find(
-    (entry) => !entry.collected && entry.x === state.game.position.x && entry.lane === state.game.position.lane,
+  const child = getCurrentChild()
+  if (!child) return
+
+  const coin = child.game.coins.find(
+    (entry) => !entry.collected && entry.x === child.game.position.x && entry.lane === child.game.position.lane,
   )
 
   if (!coin) return
@@ -413,15 +501,18 @@ function collectCoinIfPresent() {
 }
 
 function hitObstacle() {
-  return state.game.obstacles.some(
-    (entry) => entry.x === state.game.position.x && entry.lane === state.game.position.lane,
+  const child = getCurrentChild()
+  if (!child) return false
+  return child.game.obstacles.some(
+    (entry) => entry.x === child.game.position.x && entry.lane === child.game.position.lane,
   )
 }
 
 function checkFinish() {
-  if (state.game.position.x < state.game.finishX) return
+  const child = getCurrentChild()
+  if (!child || child.game.position.x < child.game.finishX) return
 
-  const collectedCoins = state.game.coins.filter((coin) => coin.collected).length
+  const collectedCoins = child.game.coins.filter((coin) => coin.collected).length
   const reward = {
     coins: 10 + collectedCoins * 3,
     stars: 8 + collectedCoins,
@@ -436,11 +527,14 @@ function checkFinish() {
 }
 
 function movePlayer(deltaX, deltaLane = 0) {
-  const nextLane = Math.max(0, Math.min(state.game.laneCount - 1, state.game.position.lane + deltaLane))
-  const nextX = Math.max(0, Math.min(state.game.finishX, state.game.position.x + deltaX))
+  const child = getCurrentChild()
+  if (!child || childIsRestricted(child)) return
 
-  state.game.position = { x: nextX, lane: nextLane }
-  state.game.steps += 1
+  const nextLane = Math.max(0, Math.min(child.game.laneCount - 1, child.game.position.lane + deltaLane))
+  const nextX = Math.max(0, Math.min(child.game.finishX, child.game.position.x + deltaX))
+
+  child.game.position = { x: nextX, lane: nextLane }
+  child.game.steps += 1
 
   if (hitObstacle()) {
     state.lastResult = 'Oops! You bumped into an obstacle. Back to the start.'
@@ -483,20 +577,23 @@ function bindKeyboardControls() {
 }
 
 function purchaseItem(item) {
-  if (isUnlocked(item.id)) {
+  const child = getCurrentChild()
+  if (!child || childIsRestricted(child)) return
+
+  if (child.unlockedItems.includes(item.id)) {
     state.lastResult = `${item.name} is already unlocked.`
     render()
     return
   }
 
-  if (state.profile.coins < item.cost) {
-    state.lastResult = `You need ${item.cost - state.profile.coins} more coins for ${item.name}.`
+  if (child.profile.coins < item.cost) {
+    state.lastResult = `You need ${item.cost - child.profile.coins} more coins for ${item.name}.`
     render()
     return
   }
 
-  state.profile.coins -= item.cost
-  state.unlockedItems.push(item.id)
+  child.profile.coins -= item.cost
+  child.unlockedItems.push(item.id)
   addRecentReward(`Unlocked ${item.name}`)
   state.lastResult = `Unlocked ${item.name}!`
   saveState()
@@ -504,17 +601,136 @@ function purchaseItem(item) {
 }
 
 function equipItem(type, itemId) {
-  if (!isUnlocked(itemId)) return
-  state.equipped[type] = itemId
+  const child = getCurrentChild()
+  if (!child || childIsRestricted(child) || !child.unlockedItems.includes(itemId)) return
+  child.equipped[type] = itemId
   state.lastResult = `Equipped ${findItemById(itemId)?.name}!`
   saveState()
   render()
 }
 
-function resetProgress() {
-  state = cloneDefaultState()
+function resetProfile(childId) {
+  const childIndex = state.childProfiles.findIndex((child) => child.id === childId)
+  if (childIndex === -1) return
+  const old = state.childProfiles[childIndex]
+  const fresh = createDefaultChildProfile(old.name, old.settings?.age || 8, old.settings?.difficulty || 'easy')
+  fresh.id = childId
+  fresh.status = old.status
+  fresh.banReason = old.banReason || ''
+  state.childProfiles[childIndex] = fresh
+  if (state.currentChildId === childId) normalizeCurrentChild()
+  state.lastResult = `Reset profile for ${old.name}.`
+  saveState()
+  render()
+}
+
+function removeProfile(childId) {
+  const child = state.childProfiles.find((entry) => entry.id === childId)
+  if (!child) return
+  state.childProfiles = state.childProfiles.filter((entry) => entry.id !== childId)
+  ensureCurrentChild()
+  state.lastResult = `Deleted profile for ${child.name}.`
+  saveState()
+  render()
+}
+
+function createChildProfileFromForm(prefix = 'public') {
+  const nameInput = document.getElementById(`${prefix}-child-name`)
+  const ageInput = document.getElementById(`${prefix}-child-age`)
+  const difficultyInput = document.getElementById(`${prefix}-child-difficulty`)
+
+  const name = nameInput?.value?.trim()
+  const age = Number(ageInput?.value || 8)
+  const difficulty = difficultyInput?.value || 'easy'
+
+  if (!name) {
+    state.lastResult = 'Enter a child name first.'
+    render()
+    return
+  }
+
+  const child = createDefaultChildProfile(name, age, difficulty)
+  state.childProfiles.push(child)
+  state.currentChildId = child.id
+  state.lastResult = `Created profile for ${name}.`
+  saveState()
+  render()
+}
+
+function switchChildProfile(childId) {
+  const child = state.childProfiles.find((entry) => entry.id === childId)
+  if (!child || childIsBanned(child)) {
+    state.lastResult = 'That profile is banned and can only be managed in admin.'
+    render()
+    return
+  }
+
+  state.currentChildId = childId
+  ensureCurrentChild()
   ensurePuzzle()
-  normalizeGameState()
+  normalizeCurrentChild()
+  state.lastResult = 'Switched profile.'
+  saveState()
+  render()
+}
+
+function setChildStatus(childId, status) {
+  const child = state.childProfiles.find((entry) => entry.id === childId)
+  if (!child) return
+  child.status = status
+  if (status !== 'banned') child.banReason = ''
+  if (status === 'banned' && state.currentChildId === childId) ensureCurrentChild()
+  state.lastResult = `${child.name} is now ${status}.`
+  saveState()
+  render()
+}
+
+function banChild(childId) {
+  const child = state.childProfiles.find((entry) => entry.id === childId)
+  if (!child) return
+  const reasonInput = document.getElementById(`ban-reason-${childId}`)
+  child.status = 'banned'
+  child.banReason = reasonInput?.value?.trim() || 'No reason added'
+  if (state.currentChildId === childId) ensureCurrentChild()
+  state.lastResult = `${child.name} was banned.`
+  saveState()
+  render()
+}
+
+function unbanChild(childId) {
+  const child = state.childProfiles.find((entry) => entry.id === childId)
+  if (!child) return
+  child.status = 'active'
+  child.banReason = ''
+  if (!state.currentChildId) state.currentChildId = child.id
+  state.lastResult = `${child.name} was unbanned.`
+  saveState()
+  render()
+}
+
+function grantRewardToChild(childId, type, amount) {
+  const child = state.childProfiles.find((entry) => entry.id === childId)
+  if (!child) return
+  child.profile[type] += amount
+  state.lastResult = `Gave ${amount} ${type} to ${child.name}.`
+  saveState()
+  render()
+}
+
+function toggleAdminPanel() {
+  state.admin.showPanel = !state.admin.showPanel
+  render()
+}
+
+function unlockAdmin() {
+  const input = document.getElementById('admin-passcode')?.value || ''
+  if (input === ADMIN_PASSCODE) {
+    state.admin.unlocked = true
+    state.admin.showPanel = true
+    state.lastResult = 'Admin panel unlocked.'
+  } else {
+    state.lastResult = 'Wrong passcode.'
+  }
   saveState()
   render()
 }
@@ -532,43 +748,103 @@ function renderNav() {
     <nav class="top-nav">
       <div class="brand">🎮 Roblox Rewards</div>
       <div class="nav-buttons">
-        ${tabs
-          .map(
-            ([id, label]) => `<button class="nav-btn ${state.activeTab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`,
-          )
-          .join('')}
+        ${tabs.map(([id, label]) => `<button class="nav-btn ${state.activeTab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`).join('')}
+        <button class="nav-btn admin-trigger" id="open-admin">🔐 Admin</button>
       </div>
     </nav>
   `
 }
 
+function renderPublicProfileCreator() {
+  return `
+    <section class="card public-create-panel">
+      <div class="section-heading wrap">
+        <div>
+          <p class="eyebrow">New player</p>
+          <h2>Create a child profile</h2>
+        </div>
+      </div>
+      <div class="admin-create-grid">
+        <input id="public-child-name" type="text" placeholder="Child name" />
+        <input id="public-child-age" type="number" min="6" max="12" value="8" />
+        <select id="public-child-difficulty">
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+        <button class="primary" id="public-create-child">Create Profile</button>
+      </div>
+    </section>
+  `
+}
+
+function renderProfileSelector() {
+  const visibleProfiles = state.childProfiles.filter((child) => !childIsBanned(child))
+
+  return `
+    <section class="card profile-switcher">
+      <div class="section-heading wrap">
+        <div>
+          <p class="eyebrow">Players</p>
+          <h2>Choose a child profile</h2>
+        </div>
+      </div>
+      <div class="profile-grid">
+        ${visibleProfiles.length
+          ? visibleProfiles
+              .map(
+                (child) => `
+                  <button class="profile-card ${state.currentChildId === child.id ? 'active' : ''}" data-switch-child="${child.id}">
+                    <div class="profile-avatar">${findItemById(child.equipped?.skin)?.icon || '🙂'}</div>
+                    <strong>${child.name}</strong>
+                    <span>Age ${child.settings?.age || 8} • ${child.settings?.difficulty || 'easy'}</span>
+                    <span>${childIsLocked(child) ? '🔒 Locked' : `⭐ Level ${child.profile?.level || 1}`}</span>
+                  </button>
+                `,
+              )
+              .join('')
+          : '<div class="recent-item">No active child profiles yet. Create one below.</div>'}
+      </div>
+    </section>
+  `
+}
+
 function renderHome() {
-  const accuracy = state.profile.totalAnswers
-    ? Math.round((state.profile.correctAnswers / state.profile.totalAnswers) * 100)
+  const child = getCurrentChild()
+  if (!child) {
+    return `${renderProfileSelector()}${renderPublicProfileCreator()}`
+  }
+
+  const accuracy = child.profile.totalAnswers
+    ? Math.round((child.profile.correctAnswers / child.profile.totalAnswers) * 100)
     : 0
 
   return `
-    <section class="hero-panel card">
+    ${renderProfileSelector()}
+    ${renderPublicProfileCreator()}
+    <section class="hero-panel card ${childIsRestricted(child) ? 'locked-panel' : ''}">
       <div>
         <p class="eyebrow">Learn. Play. Unlock cool stuff.</p>
-        <h1>Welcome back, ${state.profile.name}!</h1>
+        <h1>Welcome back, ${child.name}!</h1>
         <p class="hero-copy">A safe local-only learning adventure with puzzles, quests, badges, and virtual items — no Roblox account needed.</p>
+        ${childIsLocked(child) ? `<div class="locked-message">🔒 This profile is paused by admin.</div>` : ''}
+        ${childIsBanned(child) ? `<div class="locked-message">⛔ This profile is banned by admin. ${child.banReason}</div>` : ''}
         <div class="hero-actions">
-          <button class="primary big" data-tab-target="play">▶ Play Adventure</button>
-          <button class="secondary big" data-tab-target="puzzles">🧠 Solve Puzzles</button>
+          <button class="primary big" data-tab-target="play" ${childIsRestricted(child) ? 'disabled' : ''}>▶ Play Adventure</button>
+          <button class="secondary big" data-tab-target="puzzles" ${childIsRestricted(child) ? 'disabled' : ''}>🧠 Solve Puzzles</button>
         </div>
       </div>
       <div class="avatar-showcase">
         <div class="avatar-card">
-          <div class="avatar-face">${findItemById(state.equipped.skin)?.icon || '😄'}</div>
+          <div class="avatar-face">${findItemById(child.equipped.skin)?.icon || '😄'}</div>
           <div class="avatar-gear">
-            <span>${findItemById(state.equipped.hat)?.icon || '🧢'}</span>
-            <span>${findItemById(state.equipped.glasses)?.icon || '👓'}</span>
-            <span>${findItemById(state.equipped.pet)?.icon || '🐾'}</span>
-            <span>${findItemById(state.equipped.trail)?.icon || '✨'}</span>
-            <span>${findItemById(state.equipped.outfit)?.icon || '🦸'}</span>
+            <span>${findItemById(child.equipped.hat)?.icon || '🧢'}</span>
+            <span>${findItemById(child.equipped.glasses)?.icon || '👓'}</span>
+            <span>${findItemById(child.equipped.pet)?.icon || '🐾'}</span>
+            <span>${findItemById(child.equipped.trail)?.icon || '✨'}</span>
+            <span>${findItemById(child.equipped.outfit)?.icon || '🦸'}</span>
           </div>
-          <p>Level ${state.profile.level} Explorer</p>
+          <p>Level ${child.profile.level} Explorer</p>
         </div>
       </div>
     </section>
@@ -576,22 +852,22 @@ function renderHome() {
     <section class="dashboard-grid">
       <div class="card stats-card">
         <h2>Progress</h2>
-        <div class="stat-row"><span>XP to next level</span><strong>${state.profile.xp}/${state.profile.nextLevelXp}</strong></div>
-        <div class="progress-track"><div class="progress-fill" style="width:${progressPercent(state.profile.xp, state.profile.nextLevelXp)}%"></div></div>
+        <div class="stat-row"><span>XP to next level</span><strong>${child.profile.xp}/${child.profile.nextLevelXp}</strong></div>
+        <div class="progress-track"><div class="progress-fill" style="width:${progressPercent(child.profile.xp, child.profile.nextLevelXp)}%"></div></div>
         <div class="currency-row">
-          <div>🪙 ${state.profile.coins} Coins</div>
-          <div>⭐ ${state.profile.stars} Stars</div>
-          <div>💎 ${state.profile.gems} Gems</div>
+          <div>🪙 ${child.profile.coins} Coins</div>
+          <div>⭐ ${child.profile.stars} Stars</div>
+          <div>💎 ${child.profile.gems} Gems</div>
         </div>
         <div class="mini-stats">
           <span>🎯 Accuracy: ${accuracy}%</span>
-          <span>🔥 Streak: ${state.profile.streak}</span>
+          <span>🔥 Streak: ${child.profile.streak}</span>
         </div>
       </div>
 
       <div class="card quest-card">
         <h2>Daily Quests</h2>
-        ${state.quests
+        ${child.quests
           .map(
             (quest) => `
               <div class="quest-item">
@@ -609,7 +885,7 @@ function renderHome() {
       <div class="card rewards-preview">
         <h2>Recent Rewards</h2>
         <div class="recent-list">
-          ${(state.recentRewards.length ? state.recentRewards : ['Start playing to earn your first reward!'])
+          ${(child.recentRewards.length ? child.recentRewards : ['Start playing to earn your first reward!'])
             .map((entry) => `<div class="recent-item">🎁 ${entry}</div>`)
             .join('')}
         </div>
@@ -619,10 +895,13 @@ function renderHome() {
 }
 
 function renderBoardCell(x, lane) {
-  const playerHere = state.game.position.x === x && state.game.position.lane === lane
-  const obstacle = state.game.obstacles.find((entry) => entry.x === x && entry.lane === lane)
-  const coin = state.game.coins.find((entry) => entry.x === x && entry.lane === lane && !entry.collected)
-  const finishHere = x === state.game.finishX && lane === 1
+  const child = getCurrentChild()
+  if (!child) return '<div class="board-cell"></div>'
+
+  const playerHere = child.game.position.x === x && child.game.position.lane === lane
+  const obstacle = child.game.obstacles.find((entry) => entry.x === x && entry.lane === lane)
+  const coin = child.game.coins.find((entry) => entry.x === x && entry.lane === lane && !entry.collected)
+  const finishHere = x === child.game.finishX && lane === 1
 
   let content = ''
   let className = 'board-cell'
@@ -640,7 +919,7 @@ function renderBoardCell(x, lane) {
     className += ' coin'
   }
   if (playerHere) {
-    content = findItemById(state.equipped.skin)?.icon || '🧍'
+    content = findItemById(child.equipped.skin)?.icon || '🧍'
     className += ' player-cell'
   }
 
@@ -648,68 +927,73 @@ function renderBoardCell(x, lane) {
 }
 
 function renderPlay() {
-  const collectedCoins = state.game.coins.filter((coin) => coin.collected).length
+  const child = getCurrentChild()
+  if (!child) return ''
+
+  const collectedCoins = child.game.coins.filter((coin) => coin.collected).length
 
   return `
-    <section class="card play-panel">
+    <section class="card play-panel ${childIsRestricted(child) ? 'locked-panel' : ''}">
       <div class="section-heading wrap">
         <div>
           <p class="eyebrow">Mini adventure</p>
           <h2>Sky Path Dash</h2>
         </div>
-        <button class="secondary" id="reset-mini-game">Reset Run</button>
+        <button class="secondary" id="reset-mini-game" ${childIsRestricted(child) ? 'disabled' : ''}>Reset Run</button>
       </div>
       <p>Move across the path, collect coins, avoid blocks and slime, and reach the trophy.</p>
       <div class="controls-note">Use buttons, tap controls, or keyboard: Right / Up / Down / Space</div>
 
       <div class="game-status-row">
-        <div class="status-pill">Position: ${state.game.position.x}/${state.game.finishX}</div>
-        <div class="status-pill">Lane: ${state.game.position.lane + 1}</div>
-        <div class="status-pill">Coins grabbed: ${collectedCoins}/${state.game.coins.length}</div>
+        <div class="status-pill">Position: ${child.game.position.x}/${child.game.finishX}</div>
+        <div class="status-pill">Lane: ${child.game.position.lane + 1}</div>
+        <div class="status-pill">Coins grabbed: ${collectedCoins}/${child.game.coins.length}</div>
       </div>
 
       <div class="board-wrap">
-        <div class="board-grid" style="grid-template-columns: repeat(${state.game.finishX + 1}, minmax(52px, 1fr));">
-          ${Array.from({ length: state.game.laneCount }, (_, lane) =>
-            Array.from({ length: state.game.finishX + 1 }, (_, x) => renderBoardCell(x, lane)).join(''),
+        <div class="board-grid" style="grid-template-columns: repeat(${child.game.finishX + 1}, minmax(52px, 1fr));">
+          ${Array.from({ length: child.game.laneCount }, (_, lane) =>
+            Array.from({ length: child.game.finishX + 1 }, (_, x) => renderBoardCell(x, lane)).join(''),
           ).join('')}
         </div>
       </div>
 
       <div class="play-controls">
-        <button class="secondary control-btn" data-move="up">↗ Jump Up</button>
-        <button class="primary control-btn" data-move="right">➡ Move Right</button>
-        <button class="secondary control-btn" data-move="down">↘ Jump Down</button>
-        <button class="secondary control-btn" data-move="boost">⏩ Dash</button>
+        <button class="secondary control-btn" data-move="up" ${childIsRestricted(child) ? 'disabled' : ''}>↗ Jump Up</button>
+        <button class="primary control-btn" data-move="right" ${childIsRestricted(child) ? 'disabled' : ''}>➡ Move Right</button>
+        <button class="secondary control-btn" data-move="down" ${childIsRestricted(child) ? 'disabled' : ''}>↘ Jump Down</button>
+        <button class="secondary control-btn" data-move="boost" ${childIsRestricted(child) ? 'disabled' : ''}>⏩ Dash</button>
       </div>
     </section>
   `
 }
 
 function renderPuzzles() {
+  const child = getCurrentChild()
+  if (!child) return ''
   ensurePuzzle()
-  const puzzle = state.currentPuzzle
+  const puzzle = child.currentPuzzle
 
   return `
-    <section class="card puzzle-panel">
+    <section class="card puzzle-panel ${childIsRestricted(child) ? 'locked-panel' : ''}">
       <div class="section-heading wrap">
         <div>
           <p class="eyebrow">Puzzle zone</p>
           <h2>${puzzle.type === 'math' ? 'Math Mission' : 'Word Quest'}</h2>
         </div>
         <div class="pill-switch">
-          <button class="switch-btn ${state.activePuzzleSet === 'math' ? 'active' : ''}" data-puzzle-set="math">Math</button>
-          <button class="switch-btn ${state.activePuzzleSet === 'english' ? 'active' : ''}" data-puzzle-set="english">English</button>
+          <button class="switch-btn ${state.activePuzzleSet === 'math' ? 'active' : ''}" data-puzzle-set="math" ${childIsRestricted(child) ? 'disabled' : ''}>Math</button>
+          <button class="switch-btn ${state.activePuzzleSet === 'english' ? 'active' : ''}" data-puzzle-set="english" ${childIsRestricted(child) ? 'disabled' : ''}>English</button>
         </div>
       </div>
 
       <div class="puzzle-card-inner">
         <div>
-          <div class="puzzle-badge">Age ${state.settings.age} • ${state.settings.difficulty}</div>
+          <div class="puzzle-badge">${child.name} • Age ${child.settings.age} • ${child.settings.difficulty}</div>
           <h3>${puzzle.prompt}</h3>
           <p class="hint-text">Hint: ${puzzle.hint}</p>
           <div class="answer-grid">
-            ${puzzle.options.map((option) => `<button class="answer-btn" data-answer="${option}">${option}</button>`).join('')}
+            ${puzzle.options.map((option) => `<button class="answer-btn" data-answer="${option}" ${childIsRestricted(child) ? 'disabled' : ''}>${option}</button>`).join('')}
           </div>
         </div>
         <div class="reward-box">
@@ -727,14 +1011,17 @@ function renderPuzzles() {
 }
 
 function renderShop() {
+  const child = getCurrentChild()
+  if (!child) return ''
+
   return `
-    <section class="card shop-panel">
+    <section class="card shop-panel ${childIsRestricted(child) ? 'locked-panel' : ''}">
       <div class="section-heading wrap">
         <div>
           <p class="eyebrow">Unlockables</p>
           <h2>Reward Shop</h2>
         </div>
-        <div class="wallet">🪙 ${state.profile.coins} coins available</div>
+        <div class="wallet">🪙 ${child.profile.coins} coins available</div>
       </div>
       ${Object.entries(rewardsCatalog)
         .map(
@@ -744,17 +1031,17 @@ function renderShop() {
               <div class="shop-grid">
                 ${items
                   .map((item) => {
-                    const unlocked = isUnlocked(item.id)
+                    const unlocked = child.unlockedItems.includes(item.id)
                     const equipType = categoryToEquipType(category)
-                    const equipped = state.equipped[equipType] === item.id
+                    const equipped = child.equipped[equipType] === item.id
                     return `
                       <div class="shop-item ${unlocked ? 'unlocked' : ''}">
                         <div class="shop-icon">${item.icon}</div>
                         <strong>${item.name}</strong>
                         <span>${item.cost} coins</span>
                         <div class="shop-actions">
-                          <button class="secondary" data-buy-item="${item.id}">${unlocked ? 'Unlocked' : 'Unlock'}</button>
-                          ${unlocked ? `<button class="primary" data-equip-item="${item.id}" data-equip-type="${equipType}">${equipped ? 'Equipped' : 'Equip'}</button>` : ''}
+                          <button class="secondary" data-buy-item="${item.id}" ${childIsRestricted(child) ? 'disabled' : ''}>${unlocked ? 'Unlocked' : 'Unlock'}</button>
+                          ${unlocked ? `<button class="primary" data-equip-item="${item.id}" data-equip-type="${equipType}" ${childIsRestricted(child) ? 'disabled' : ''}>${equipped ? 'Equipped' : 'Equip'}</button>` : ''}
                         </div>
                       </div>
                     `
@@ -770,44 +1057,134 @@ function renderShop() {
 }
 
 function renderParent() {
+  const child = getCurrentChild()
+  if (!child) return ''
+
   return `
-    <section class="card parent-panel">
+    <section class="card parent-panel ${childIsRestricted(child) ? 'locked-panel' : ''}">
       <div class="section-heading wrap">
         <div>
           <p class="eyebrow">For grown-ups</p>
           <h2>Parent Settings</h2>
         </div>
-        <button class="secondary" id="reset-progress">Reset local save</button>
+        <button class="secondary" id="reset-current-profile">Reset current profile</button>
       </div>
       <div class="settings-grid">
         <label>
           <span>Age</span>
-          <input id="age-setting" type="range" min="6" max="12" value="${state.settings.age}" />
-          <strong>${state.settings.age} years old</strong>
+          <input id="age-setting" type="range" min="6" max="12" value="${child.settings.age}" ${!state.admin.unlocked ? 'disabled' : ''} />
+          <strong>${child.settings.age} years old</strong>
         </label>
         <label>
           <span>Difficulty</span>
-          <select id="difficulty-setting">
-            <option value="easy" ${state.settings.difficulty === 'easy' ? 'selected' : ''}>Easy</option>
-            <option value="medium" ${state.settings.difficulty === 'medium' ? 'selected' : ''}>Medium</option>
-            <option value="hard" ${state.settings.difficulty === 'hard' ? 'selected' : ''}>Hard</option>
+          <select id="difficulty-setting" ${!state.admin.unlocked ? 'disabled' : ''}>
+            <option value="easy" ${child.settings.difficulty === 'easy' ? 'selected' : ''}>Easy</option>
+            <option value="medium" ${child.settings.difficulty === 'medium' ? 'selected' : ''}>Medium</option>
+            <option value="hard" ${child.settings.difficulty === 'hard' ? 'selected' : ''}>Hard</option>
           </select>
         </label>
         <label>
           <span>Session time limit</span>
-          <input id="time-limit-setting" type="range" min="10" max="60" step="5" value="${state.settings.timeLimit}" />
-          <strong>${state.settings.timeLimit} minutes</strong>
+          <input id="time-limit-setting" type="range" min="10" max="60" step="5" value="${child.settings.timeLimit}" ${!state.admin.unlocked ? 'disabled' : ''} />
+          <strong>${child.settings.timeLimit} minutes</strong>
         </label>
         <label class="toggle-row">
           <span>Sound</span>
-          <button class="toggle ${state.settings.sound ? 'on' : ''}" id="toggle-sound">${state.settings.sound ? 'ON' : 'OFF'}</button>
+          <button class="toggle ${child.settings.sound ? 'on' : ''}" id="toggle-sound" ${!state.admin.unlocked ? 'disabled' : ''}>${child.settings.sound ? 'ON' : 'OFF'}</button>
         </label>
         <label class="toggle-row">
           <span>Safe local-only mode</span>
-          <button class="toggle ${state.settings.safeLocalMode ? 'on' : ''}" id="toggle-safe">${state.settings.safeLocalMode ? 'ON' : 'OFF'}</button>
+          <button class="toggle ${child.settings.safeLocalMode ? 'on' : ''}" id="toggle-safe" ${!state.admin.unlocked ? 'disabled' : ''}>${child.settings.safeLocalMode ? 'ON' : 'OFF'}</button>
         </label>
       </div>
-      <div class="safe-note">🔒 Saves stay in this browser via localStorage. No Roblox login, no account linking, no Robux claims.</div>
+      <div class="safe-note">🔒 Parent settings require admin unlock. Saves stay local only.</div>
+    </section>
+  `
+}
+
+function renderAdminPanel() {
+  const child = getCurrentChild()
+
+  if (!state.admin.showPanel) return ''
+
+  if (!state.admin.unlocked) {
+    return `
+      <section class="card admin-panel">
+        <div class="section-heading wrap">
+          <div>
+            <p class="eyebrow">Admin</p>
+            <h2>Unlock admin panel</h2>
+          </div>
+        </div>
+        <div class="admin-login-row">
+          <input id="admin-passcode" type="password" placeholder="Enter admin passcode" />
+          <button class="primary" id="unlock-admin">Unlock</button>
+        </div>
+      </section>
+    `
+  }
+
+  return `
+    <section class="card admin-panel">
+      <div class="section-heading wrap">
+        <div>
+          <p class="eyebrow">Admin tools</p>
+          <h2>Aarav Admin Panel</h2>
+        </div>
+      </div>
+
+      <div class="admin-section">
+        <h3>Create child profile</h3>
+        <div class="admin-create-grid">
+          <input id="admin-child-name" type="text" placeholder="Child name" />
+          <input id="admin-child-age" type="number" min="6" max="12" value="8" />
+          <select id="admin-child-difficulty">
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+          <button class="primary" id="admin-create-child">Create Profile</button>
+        </div>
+      </div>
+
+      <div class="admin-section">
+        <h3>Child profiles</h3>
+        <div class="admin-child-list">
+          ${state.childProfiles
+            .map(
+              (entry) => `
+                <div class="admin-child-card ${state.currentChildId === entry.id ? 'active' : ''}">
+                  <div>
+                    <strong>${entry.name}</strong>
+                    <div>Age ${entry.settings.age} • ${entry.settings.difficulty} • ${entry.status}</div>
+                    <div>Coins ${entry.profile.coins} • Stars ${entry.profile.stars} • Gems ${entry.profile.gems}</div>
+                    ${childIsBanned(entry) ? `<div class="admin-note">Ban reason: ${entry.banReason}</div>` : ''}
+                  </div>
+                  <div class="admin-actions">
+                    ${!childIsBanned(entry) ? `<button class="secondary" data-admin-switch="${entry.id}">Open</button>` : ''}
+                    <button class="secondary" data-admin-lock="${entry.id}">${childIsLocked(entry) ? 'Unlock' : 'Lock'}</button>
+                    ${childIsBanned(entry)
+                      ? `<button class="secondary" data-admin-unban="${entry.id}">Unban</button>`
+                      : `<button class="secondary" data-admin-ban="${entry.id}">Ban</button>`}
+                    <button class="secondary" data-admin-give="${entry.id}" data-give-type="coins">+20 Coins</button>
+                    <button class="secondary" data-admin-give="${entry.id}" data-give-type="stars">+10 Stars</button>
+                    <button class="secondary" data-admin-reset="${entry.id}">Reset</button>
+                    <button class="secondary danger" data-admin-delete="${entry.id}">Delete</button>
+                  </div>
+                  ${!childIsBanned(entry) ? `<input id="ban-reason-${entry.id}" type="text" placeholder="Reason if banning this profile" />` : ''}
+                </div>
+              `,
+            )
+            .join('')}
+        </div>
+      </div>
+
+      ${child ? `
+        <div class="admin-section">
+          <h3>Current child: ${child.name}</h3>
+          <div class="admin-note">Status: ${child.status}. Lock pauses access. Ban hides the profile from the child picker.</div>
+        </div>
+      ` : ''}
     </section>
   `
 }
@@ -817,6 +1194,7 @@ function render() {
     <div class="app-shell">
       ${renderNav()}
       <main class="main-content">
+        ${renderAdminPanel()}
         ${renderHome()}
         ${state.activeTab === 'play' ? renderPlay() : ''}
         ${state.activeTab === 'puzzles' ? renderPuzzles() : ''}
@@ -836,6 +1214,50 @@ function bindEvents() {
     button.addEventListener('click', () => setTab(button.dataset.tab))
   })
 
+  document.getElementById('open-admin')?.addEventListener('click', toggleAdminPanel)
+  document.getElementById('unlock-admin')?.addEventListener('click', unlockAdmin)
+  document.getElementById('admin-create-child')?.addEventListener('click', () => createChildProfileFromForm('admin'))
+  document.getElementById('public-create-child')?.addEventListener('click', () => createChildProfileFromForm('public'))
+
+  document.querySelectorAll('[data-admin-switch]').forEach((button) => {
+    button.addEventListener('click', () => switchChildProfile(button.dataset.adminSwitch))
+  })
+
+  document.querySelectorAll('[data-admin-lock]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const child = state.childProfiles.find((entry) => entry.id === button.dataset.adminLock)
+      if (!child) return
+      setChildStatus(child.id, childIsLocked(child) ? 'active' : 'locked')
+    })
+  })
+
+  document.querySelectorAll('[data-admin-ban]').forEach((button) => {
+    button.addEventListener('click', () => banChild(button.dataset.adminBan))
+  })
+
+  document.querySelectorAll('[data-admin-unban]').forEach((button) => {
+    button.addEventListener('click', () => unbanChild(button.dataset.adminUnban))
+  })
+
+  document.querySelectorAll('[data-admin-give]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const amount = button.dataset.giveType === 'coins' ? 20 : 10
+      grantRewardToChild(button.dataset.adminGive, button.dataset.giveType, amount)
+    })
+  })
+
+  document.querySelectorAll('[data-admin-reset]').forEach((button) => {
+    button.addEventListener('click', () => resetProfile(button.dataset.adminReset))
+  })
+
+  document.querySelectorAll('[data-admin-delete]').forEach((button) => {
+    button.addEventListener('click', () => removeProfile(button.dataset.adminDelete))
+  })
+
+  document.querySelectorAll('[data-switch-child]').forEach((button) => {
+    button.addEventListener('click', () => switchChildProfile(button.dataset.switchChild))
+  })
+
   document.querySelectorAll('[data-tab-target]').forEach((button) => {
     button.addEventListener('click', () => setTab(button.dataset.tabTarget))
   })
@@ -843,7 +1265,8 @@ function bindEvents() {
   document.querySelectorAll('[data-puzzle-set]').forEach((button) => {
     button.addEventListener('click', () => {
       state.activePuzzleSet = button.dataset.puzzleSet
-      state.currentPuzzle = null
+      const child = getCurrentChild()
+      if (child) child.currentPuzzle = null
       ensurePuzzle()
       saveState()
       render()
@@ -883,40 +1306,53 @@ function bindEvents() {
   })
 
   document.getElementById('age-setting')?.addEventListener('input', (event) => {
-    state.settings.age = Number(event.target.value)
-    state.currentPuzzle = null
+    const child = getCurrentChild()
+    if (!child || !state.admin.unlocked) return
+    child.settings.age = Number(event.target.value)
+    child.currentPuzzle = null
     ensurePuzzle()
     saveState()
     render()
   })
 
   document.getElementById('difficulty-setting')?.addEventListener('change', (event) => {
-    state.settings.difficulty = event.target.value
-    state.currentPuzzle = null
+    const child = getCurrentChild()
+    if (!child || !state.admin.unlocked) return
+    child.settings.difficulty = event.target.value
+    child.currentPuzzle = null
     ensurePuzzle()
     saveState()
     render()
   })
 
   document.getElementById('time-limit-setting')?.addEventListener('input', (event) => {
-    state.settings.timeLimit = Number(event.target.value)
+    const child = getCurrentChild()
+    if (!child || !state.admin.unlocked) return
+    child.settings.timeLimit = Number(event.target.value)
     saveState()
     render()
   })
 
   document.getElementById('toggle-sound')?.addEventListener('click', () => {
-    state.settings.sound = !state.settings.sound
+    const child = getCurrentChild()
+    if (!child || !state.admin.unlocked) return
+    child.settings.sound = !child.settings.sound
     saveState()
     render()
   })
 
   document.getElementById('toggle-safe')?.addEventListener('click', () => {
-    state.settings.safeLocalMode = !state.settings.safeLocalMode
+    const child = getCurrentChild()
+    if (!child || !state.admin.unlocked) return
+    child.settings.safeLocalMode = !child.settings.safeLocalMode
     saveState()
     render()
   })
 
-  document.getElementById('reset-progress')?.addEventListener('click', resetProgress)
+  document.getElementById('reset-current-profile')?.addEventListener('click', () => {
+    const child = getCurrentChild()
+    if (child && state.admin.unlocked) resetProfile(child.id)
+  })
 }
 
 render()
