@@ -1,0 +1,498 @@
+:root {
+  font-family: 'Trebuchet MS', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  line-height: 1.4;
+  font-weight: 400;
+  color: #23304d;
+  background:
+    radial-gradient(circle at top left, #ffe67a, transparent 28%),
+    radial-gradient(circle at top right, #8fe1ff, transparent 24%),
+    linear-gradient(180deg, #8dd8ff 0%, #c9f2ff 42%, #fff5d8 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+
+button:hover {
+  transform: translateY(-2px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.app-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.top-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  margin-bottom: 20px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px);
+  border-radius: 24px;
+  box-shadow: 0 16px 40px rgba(74, 120, 183, 0.16);
+}
+
+.brand {
+  font-size: 1.35rem;
+  font-weight: 900;
+  color: #24366f;
+}
+
+.nav-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.nav-btn,
+.secondary,
+.primary,
+.switch-btn,
+.toggle {
+  border-radius: 999px;
+  padding: 12px 18px;
+  font-weight: 800;
+}
+
+.nav-btn,
+.secondary,
+.switch-btn {
+  background: #eef5ff;
+  color: #33508d;
+}
+
+.nav-btn.active,
+.switch-btn.active {
+  background: linear-gradient(135deg, #ff8fe0, #7a8cff);
+  color: white;
+  box-shadow: 0 12px 24px rgba(122, 140, 255, 0.25);
+}
+
+.primary {
+  background: linear-gradient(135deg, #ff8a38, #ff4ec6);
+  color: white;
+  box-shadow: 0 12px 24px rgba(255, 102, 170, 0.24);
+}
+
+.secondary {
+  box-shadow: 0 10px 20px rgba(92, 138, 236, 0.12);
+}
+
+.big {
+  padding: 16px 24px;
+  font-size: 1.05rem;
+}
+
+.main-content {
+  display: grid;
+  gap: 20px;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.86);
+  border-radius: 28px;
+  padding: 24px;
+  box-shadow: 0 20px 40px rgba(61, 107, 152, 0.14);
+}
+
+.hero-panel {
+  display: grid;
+  grid-template-columns: 1.25fr 0.9fr;
+  gap: 20px;
+  align-items: center;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: #ff5a9e;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.85rem;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: clamp(2rem, 4vw, 3.3rem);
+  color: #22335b;
+  margin-bottom: 12px;
+}
+
+h2 {
+  font-size: 1.65rem;
+  color: #24366f;
+  margin-bottom: 12px;
+}
+
+.hero-copy {
+  font-size: 1.08rem;
+  max-width: 56ch;
+  margin-bottom: 22px;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.avatar-showcase {
+  display: flex;
+  justify-content: center;
+}
+
+.avatar-card {
+  width: min(290px, 100%);
+  padding: 24px;
+  border-radius: 28px;
+  text-align: center;
+  background: linear-gradient(180deg, #fff8d5, #f5f0ff);
+  border: 4px solid #fff;
+}
+
+.avatar-face {
+  width: 120px;
+  height: 120px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 3.5rem;
+  background: linear-gradient(180deg, #89d3ff, #6d86ff);
+  box-shadow: inset 0 -10px 18px rgba(255, 255, 255, 0.3);
+}
+
+.avatar-gear {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  font-size: 1.6rem;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.stat-row,
+.quest-top,
+.section-heading,
+.wallet {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.section-heading.wrap {
+  flex-wrap: wrap;
+}
+
+.progress-track {
+  width: 100%;
+  height: 16px;
+  border-radius: 999px;
+  background: #e5efff;
+  overflow: hidden;
+  margin: 14px 0;
+}
+
+.progress-track.small {
+  height: 12px;
+  margin: 10px 0 0;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ffd94e, #ff8c5a, #ff4ec6);
+}
+
+.currency-row,
+.reward-chips,
+.obstacles,
+.mini-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.currency-row div,
+.reward-chips span,
+.wallet,
+.puzzle-badge,
+.safe-note,
+.mini-stats span,
+.recent-item,
+.hint-text {
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: #f1f7ff;
+  font-weight: 800;
+}
+
+.quest-item + .quest-item,
+.shop-category + .shop-category {
+  margin-top: 16px;
+}
+
+.play-panel p,
+.parent-panel p {
+  margin-bottom: 14px;
+}
+
+.recent-list {
+  display: grid;
+  gap: 10px;
+}
+
+.hint-text {
+  display: inline-block;
+  margin-bottom: 18px;
+  font-weight: 700;
+  color: #355080;
+}
+
+.game-lane {
+  position: relative;
+  height: 160px;
+  border-radius: 24px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #8bd6ff 0%, #d7f2ff 55%, #a3e27f 55%, #7dcf5f 100%);
+  margin: 18px 0;
+}
+
+.lane-bg {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 40px, rgba(255,255,255,0.25) 40px 46px);
+}
+
+.player,
+.goal {
+  position: absolute;
+  bottom: 24px;
+  font-size: 2.2rem;
+  z-index: 1;
+}
+
+.player {
+  transition: left 0.25s ease;
+}
+
+.goal {
+  right: 20px;
+}
+
+.puzzle-card-inner {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.pill-switch {
+  display: inline-flex;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 999px;
+  background: #edf4ff;
+}
+
+.answer-grid,
+.shop-grid,
+.settings-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.answer-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin-top: 18px;
+}
+
+.answer-btn {
+  padding: 18px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #ffffff, #eef6ff);
+  color: #24366f;
+  font-weight: 900;
+  border: 3px solid #dbe9ff;
+}
+
+.reward-box {
+  background: linear-gradient(180deg, #fff7c7, #ffe7f2);
+  border-radius: 24px;
+  padding: 18px;
+}
+
+.reward-box ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.shop-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.shop-item {
+  padding: 18px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #f8fbff, #eef2ff);
+  border: 3px solid #dfe8ff;
+  display: grid;
+  gap: 10px;
+}
+
+.shop-item.unlocked {
+  border-color: #ffd76a;
+  background: linear-gradient(180deg, #fffbe6, #fff1f9);
+}
+
+.shop-icon {
+  font-size: 2rem;
+}
+
+.shop-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 14px;
+}
+
+.settings-grid label {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 20px;
+  background: #f5f9ff;
+  font-weight: 700;
+}
+
+.toggle-row {
+  align-content: center;
+}
+
+.toggle {
+  width: fit-content;
+  background: #d8e6ff;
+  color: #27457a;
+}
+
+.toggle.on {
+  background: linear-gradient(135deg, #61d96b, #30b7a2);
+  color: white;
+}
+
+input[type='range'] {
+  width: 100%;
+}
+
+select {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 2px solid #d9e7ff;
+  background: white;
+}
+
+.toast {
+  position: sticky;
+  bottom: 16px;
+  width: fit-content;
+  max-width: 100%;
+  margin-left: auto;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: #24366f;
+  color: white;
+  font-weight: 800;
+  box-shadow: 0 14px 30px rgba(36, 54, 111, 0.24);
+}
+
+@media (max-width: 900px) {
+  .hero-panel,
+  .dashboard-grid,
+  .puzzle-card-inner {
+    grid-template-columns: 1fr;
+  }
+
+  .top-nav,
+  .section-heading,
+  .quest-top,
+  .stat-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .card,
+  .top-nav {
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .hero-actions,
+  .shop-actions,
+  .nav-buttons {
+    flex-direction: column;
+  }
+
+  .hero-actions > button,
+  .shop-actions > button,
+  .nav-buttons > button {
+    width: 100%;
+  }
+}
