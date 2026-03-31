@@ -1,8 +1,8 @@
 import './style.css'
 
-const STORAGE_KEY = 'rewards-save-v5'
-const LEGACY_STORAGE_KEYS = ['rewards-save-v4', 'roblox-rewards-save-v3']
-const ADMIN_PASSCODE = '1234'
+const STORAGE_KEY = 'rewards-save-v6'
+const LEGACY_STORAGE_KEYS = ['rewards-save-v5', 'rewards-save-v4', 'roblox-rewards-save-v3']
+const DEFAULT_ADMIN_PASSCODE = '1234'
 const ADMIN_AUTOLOCK_MS = 60 * 1000
 
 const rewardsCatalog = {
@@ -116,6 +116,7 @@ const defaultState = {
   admin: {
     unlocked: false,
     showPanel: false,
+    passcode: DEFAULT_ADMIN_PASSCODE,
   },
   childProfiles: [],
 }
@@ -139,7 +140,6 @@ function cloneDefaultState() {
 
 function loadState() {
   const base = cloneDefaultState()
-
   const keysToTry = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS]
 
   for (const key of keysToTry) {
@@ -151,7 +151,12 @@ function loadState() {
       return {
         ...base,
         ...parsed,
-        admin: { ...base.admin, ...(parsed.admin || {}), unlocked: false },
+        admin: {
+          ...base.admin,
+          ...(parsed.admin || {}),
+          unlocked: false,
+          passcode: parsed.admin?.passcode || DEFAULT_ADMIN_PASSCODE,
+        },
         childProfiles: Array.isArray(parsed.childProfiles) ? parsed.childProfiles : [],
       }
     } catch {
@@ -1020,6 +1025,43 @@ function setCurrentChildPasscode() {
   render()
 }
 
+function changeAdminPasscode() {
+  if (!state.admin.unlocked) return
+
+  const current = document.getElementById('admin-current-passcode')?.value || ''
+  const next = document.getElementById('admin-new-passcode')?.value || ''
+  const confirm = document.getElementById('admin-confirm-passcode')?.value || ''
+
+  if (current !== state.admin.passcode) {
+    state.lastResult = 'Current admin passcode is incorrect.'
+    render()
+    return
+  }
+
+  if (!next.trim()) {
+    state.lastResult = 'Enter a new admin passcode.'
+    render()
+    return
+  }
+
+  if (next.length < 4) {
+    state.lastResult = 'Admin passcode must be at least 4 characters.'
+    render()
+    return
+  }
+
+  if (next !== confirm) {
+    state.lastResult = 'New admin passcodes do not match.'
+    render()
+    return
+  }
+
+  state.admin.passcode = next
+  state.lastResult = 'Admin passcode changed.'
+  saveState()
+  render()
+}
+
 function grantRewardToChild(childId, type, amount) {
   const child = state.childProfiles.find((entry) => entry.id === childId)
   if (!child) return
@@ -1074,7 +1116,7 @@ function bindAdminAutoLock() {
 
 function unlockAdmin() {
   const input = document.getElementById('admin-passcode')?.value || ''
-  if (input === ADMIN_PASSCODE) {
+  if (input === state.admin.passcode) {
     state.admin.unlocked = true
     state.admin.showPanel = true
     state.lastResult = 'Admin panel unlocked.'
@@ -1631,6 +1673,16 @@ function renderAdminPanel() {
       </div>
 
       <div class="admin-section">
+        <h3>Change admin passcode</h3>
+        <div class="admin-create-grid">
+          <input id="admin-current-passcode" type="password" placeholder="Current admin passcode" />
+          <input id="admin-new-passcode" type="password" placeholder="New admin passcode" />
+          <input id="admin-confirm-passcode" type="password" placeholder="Confirm new admin passcode" />
+          <button class="primary" id="change-admin-passcode">Save Admin Passcode</button>
+        </div>
+      </div>
+
+      <div class="admin-section">
         <h3>Create child profile</h3>
         <div class="admin-create-grid">
           <input id="admin-child-name" type="text" placeholder="Child name" />
@@ -1720,6 +1772,7 @@ function bindEvents() {
 
   document.getElementById('open-admin')?.addEventListener('click', toggleAdminPanel)
   document.getElementById('unlock-admin')?.addEventListener('click', unlockAdmin)
+  document.getElementById('change-admin-passcode')?.addEventListener('click', changeAdminPasscode)
   document.getElementById('unlock-child-profile')?.addEventListener('click', loginCurrentChild)
   document.getElementById('logout-child-profile')?.addEventListener('click', logoutCurrentChild)
   document.getElementById('save-child-passcode')?.addEventListener('click', setCurrentChildPasscode)
