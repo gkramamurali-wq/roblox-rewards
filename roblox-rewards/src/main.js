@@ -123,6 +123,7 @@ autoExpireBans()
 
 const app = document.querySelector('#app')
 let keyboardBound = false
+let adminInactivityTimer = null
 
 function cloneDefaultState() {
   return JSON.parse(JSON.stringify(defaultState))
@@ -148,7 +149,15 @@ function loadState() {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  const persistedState = {
+    ...state,
+    admin: {
+      ...state.admin,
+      unlocked: false,
+      showPanel: state.admin.showPanel,
+    },
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState))
 }
 
 function ensureCurrentChild() {
@@ -809,6 +818,44 @@ function removeProfile(childId) {
   render()
 }
 
+function childNameExists(name, excludeId = null) {
+  const normalized = name.trim().toLowerCase()
+  return state.childProfiles.some((child) => child.id !== excludeId && child.name.trim().toLowerCase() === normalized)
+}
+
+function autoLockAdmin() {
+  if (!state.admin.unlocked) return
+  state.admin.unlocked = false
+  state.lastResult = 'Admin locked again.'
+  saveState()
+  render()
+}
+
+function resetAdminInactivityTimer() {
+  if (adminInactivityTimer) clearTimeout(adminInactivityTimer)
+  if (!state.admin.unlocked) return
+  adminInactivityTimer = window.setTimeout(() => {
+    autoLockAdmin()
+  }, 60 * 1000)
+}
+
+function bindAdminAutoLock() {
+  ;['click', 'keydown', 'mousemove', 'touchstart'].forEach((eventName) => {
+    window.addEventListener(eventName, () => {
+      if (state.admin.unlocked) resetAdminInactivityTimer()
+    })
+  })
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) autoLockAdmin()
+  })
+
+  window.addEventListener('beforeunload', () => {
+    state.admin.unlocked = false
+    saveState()
+  })
+}
+
 function createChildProfileFromForm(prefix = 'public') {
   const nameInput = document.getElementById(`${prefix}-child-name`)
   const ageInput = document.getElementById(`${prefix}-child-age`)
@@ -820,6 +867,12 @@ function createChildProfileFromForm(prefix = 'public') {
 
   if (!name) {
     state.lastResult = 'Enter a child name first.'
+    render()
+    return
+  }
+
+  if (childNameExists(name)) {
+    state.lastResult = 'That name is already taken. Choose a different player name.'
     render()
     return
   }
@@ -929,6 +982,7 @@ function unlockAdmin() {
     state.admin.unlocked = true
     state.admin.showPanel = true
     state.lastResult = 'Admin panel unlocked.'
+    resetAdminInactivityTimer()
   } else {
     state.lastResult = 'Wrong passcode.'
   }
@@ -1700,4 +1754,5 @@ function bindEvents() {
   })
 }
 
+bindAdminAutoLock()
 render()
