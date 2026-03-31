@@ -1,7 +1,9 @@
 import './style.css'
 
-const STORAGE_KEY = 'rewards-save-v4'
+const STORAGE_KEY = 'rewards-save-v5'
+const LEGACY_STORAGE_KEYS = ['rewards-save-v4', 'roblox-rewards-save-v3']
 const ADMIN_PASSCODE = '1234'
+const ADMIN_AUTOLOCK_MS = 60 * 1000
 
 const rewardsCatalog = {
   hats: [
@@ -59,6 +61,10 @@ function createDefaultChildProfile(name = 'New Player', age = 8, difficulty = 'e
     status: 'active',
     banReason: '',
     banExpiresAt: null,
+    auth: {
+      passcode: '',
+      unlocked: true,
+    },
     profile: {
       level: 1,
       stars: 0,
@@ -115,15 +121,17 @@ const defaultState = {
 }
 
 let state = loadState()
-ensureCurrentChild()
-ensurePuzzle()
-normalizeAllChildren()
-normalizeCurrentChild()
-autoExpireBans()
-
-const app = document.querySelector('#app')
 let keyboardBound = false
 let adminInactivityTimer = null
+let adminAutoLockBound = false
+
+normalizeAllChildren()
+autoExpireBans()
+ensureCurrentChild()
+ensurePuzzle()
+normalizeCurrentChild()
+
+const app = document.querySelector('#app')
 
 function cloneDefaultState() {
   return JSON.parse(JSON.stringify(defaultState))
@@ -132,32 +140,47 @@ function cloneDefaultState() {
 function loadState() {
   const base = cloneDefaultState()
 
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (!saved) return base
+  const keysToTry = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS]
 
-    const parsed = JSON.parse(saved)
-    return {
-      ...base,
-      ...parsed,
-      admin: { ...base.admin, ...(parsed.admin || {}) },
-      childProfiles: Array.isArray(parsed.childProfiles) ? parsed.childProfiles : [],
+  for (const key of keysToTry) {
+    try {
+      const saved = localStorage.getItem(key)
+      if (!saved) continue
+
+      const parsed = JSON.parse(saved)
+      return {
+        ...base,
+        ...parsed,
+        admin: { ...base.admin, ...(parsed.admin || {}), unlocked: false },
+        childProfiles: Array.isArray(parsed.childProfiles) ? parsed.childProfiles : [],
+      }
+    } catch {
+      continue
     }
-  } catch {
-    return base
   }
+
+  return base
 }
 
-function saveState() {
-  const persistedState = {
+function buildPersistedState() {
+  return {
     ...state,
     admin: {
       ...state.admin,
       unlocked: false,
-      showPanel: state.admin.showPanel,
     },
+    childProfiles: state.childProfiles.map((child) => ({
+      ...child,
+      auth: {
+        ...(child.auth || {}),
+        unlocked: Boolean(child.auth?.passcode) ? false : true,
+      },
+    })),
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState))
+}
+
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPersistedState()))
 }
 
 function ensureCurrentChild() {
@@ -182,8 +205,12 @@ function childIsBanned(child) {
   return child?.status === 'banned'
 }
 
+function childNeedsLogin(child) {
+  return Boolean(child?.auth?.passcode) && !child?.auth?.unlocked
+}
+
 function childIsRestricted(child) {
-  return childIsLocked(child) || childIsBanned(child)
+  return childIsLocked(child) || childIsBanned(child) || childNeedsLogin(child)
 }
 
 function normalizeAllChildren() {
@@ -222,9 +249,16 @@ function normalizeChild(child) {
     ...(child.social || {}),
   }
 
+  child.auth = {
+    passcode: '',
+    unlocked: true,
+    ...(child.auth || {}),
+  }
+
   child.social.friends = Array.isArray(child.social.friends) ? child.social.friends : []
   child.social.incomingRequests = Array.isArray(child.social.incomingRequests) ? child.social.incomingRequests : []
   child.social.outgoingRequests = Array.isArray(child.social.outgoingRequests) ? child.social.outgoingRequests : []
+  child.auth.unlocked = child.auth.passcode ? Boolean(child.auth.unlocked) : true
 
   child.equipped = {
     hat: 'hat-sun',
@@ -266,9 +300,18 @@ function autoExpireBans() {
     }
   })
 
-  if (changed) {
-    saveState()
-  }
+  if (changed) saveState()
+}
+
+function childNameExists(name, excludeId = null) {
+  const normalized = name.trim().toLowerCase()
+  return state.childProfiles.some((child) => child.id !== excludeId && child.name.trim().toLowerCase() === normalized)
+}
+
+function setTab(tab) {
+  state.activeTab = tab
+  if (tab === 'puzzles') ensurePuzzle()
+  render()
 }
 
 function rand(min, max) {
@@ -453,12 +496,6 @@ function resetMiniGame() {
   child.game = structuredClone(baseGame)
 }
 
-function setTab(tab) {
-  state.activeTab = tab
-  if (tab === 'puzzles') ensurePuzzle()
-  render()
-}
-
 function progressPercent(value, total) {
   return Math.max(0, Math.min(100, Math.round((value / total) * 100)))
 }
@@ -537,6 +574,12 @@ function syncSocialLists() {
     child.social.friends = [...new Set(child.social.friends)]
     child.social.incomingRequests = [...new Set(child.social.incomingRequests)]
     child.social.outgoingRequests = [...new Set(child.social.outgoingRequests)]
+  })
+}
+
+function lockAllProfilesExcept(keepChildId = null) {
+  state.childProfiles.forEach((child) => {
+    if (child.id !== keepChildId && child.auth?.passcode) child.auth.unlocked = false
   })
 }
 
@@ -791,6 +834,8 @@ function resetProfile(childId) {
   fresh.status = old.status
   fresh.banReason = old.banReason || ''
   fresh.banExpiresAt = old.banExpiresAt || null
+  fresh.auth.passcode = old.auth?.passcode || ''
+  fresh.auth.unlocked = old.auth?.passcode ? false : true
   state.childProfiles[childIndex] = fresh
   if (state.currentChildId === childId) normalizeCurrentChild()
   syncSocialLists()
@@ -818,44 +863,6 @@ function removeProfile(childId) {
   render()
 }
 
-function childNameExists(name, excludeId = null) {
-  const normalized = name.trim().toLowerCase()
-  return state.childProfiles.some((child) => child.id !== excludeId && child.name.trim().toLowerCase() === normalized)
-}
-
-function autoLockAdmin() {
-  if (!state.admin.unlocked) return
-  state.admin.unlocked = false
-  state.lastResult = 'Admin locked again.'
-  saveState()
-  render()
-}
-
-function resetAdminInactivityTimer() {
-  if (adminInactivityTimer) clearTimeout(adminInactivityTimer)
-  if (!state.admin.unlocked) return
-  adminInactivityTimer = window.setTimeout(() => {
-    autoLockAdmin()
-  }, 60 * 1000)
-}
-
-function bindAdminAutoLock() {
-  ;['click', 'keydown', 'mousemove', 'touchstart'].forEach((eventName) => {
-    window.addEventListener(eventName, () => {
-      if (state.admin.unlocked) resetAdminInactivityTimer()
-    })
-  })
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) autoLockAdmin()
-  })
-
-  window.addEventListener('beforeunload', () => {
-    state.admin.unlocked = false
-    saveState()
-  })
-}
-
 function createChildProfileFromForm(prefix = 'public') {
   const nameInput = document.getElementById(`${prefix}-child-name`)
   const ageInput = document.getElementById(`${prefix}-child-age`)
@@ -878,6 +885,7 @@ function createChildProfileFromForm(prefix = 'public') {
   }
 
   const child = createDefaultChildProfile(name, age, difficulty)
+  lockAllProfilesExcept(child.id)
   state.childProfiles.push(child)
   state.currentChildId = child.id
   syncSocialLists()
@@ -894,11 +902,12 @@ function switchChildProfile(childId) {
     return
   }
 
+  lockAllProfilesExcept(childId)
   state.currentChildId = childId
   ensureCurrentChild()
   ensurePuzzle()
   normalizeCurrentChild()
-  state.lastResult = 'Switched profile.'
+  state.lastResult = childNeedsLogin(child) ? `Enter ${child.name}'s passcode to continue.` : 'Switched profile.'
   saveState()
   render()
 }
@@ -930,6 +939,7 @@ function banChild(childId) {
   child.status = 'banned'
   child.banReason = reasonInput?.value?.trim() || 'No reason added'
   child.banExpiresAt = expiresAt
+  child.auth.unlocked = false
 
   state.childProfiles.forEach((entry) => {
     entry.social.friends = entry.social.friends.filter((id) => id !== childId)
@@ -956,8 +966,56 @@ function unbanChild(childId) {
   child.status = 'active'
   child.banReason = ''
   child.banExpiresAt = null
+  child.auth.unlocked = child.auth.passcode ? false : true
   if (!state.currentChildId) state.currentChildId = child.id
   state.lastResult = `${child.name} was unbanned.`
+  saveState()
+  render()
+}
+
+function loginCurrentChild() {
+  const child = getCurrentChild()
+  if (!child) return
+
+  if (!child.auth.passcode) {
+    state.lastResult = 'This profile does not have a passcode.'
+    render()
+    return
+  }
+
+  const input = document.getElementById('child-passcode')?.value || ''
+  if (input === child.auth.passcode) {
+    lockAllProfilesExcept(child.id)
+    child.auth.unlocked = true
+    state.lastResult = `${child.name} is logged in.`
+    saveState()
+    render()
+    return
+  }
+
+  state.lastResult = 'Wrong profile passcode.'
+  render()
+}
+
+function logoutCurrentChild() {
+  const child = getCurrentChild()
+  if (!child || !child.auth.passcode) return
+  child.auth.unlocked = false
+  state.lastResult = `${child.name} logged out.`
+  saveState()
+  render()
+}
+
+function setCurrentChildPasscode() {
+  const child = getCurrentChild()
+  if (!child || !state.admin.unlocked) return
+
+  const input = document.getElementById('child-passcode-setting')
+  const value = input?.value?.trim() || ''
+
+  child.auth.passcode = value
+  child.auth.unlocked = value ? false : true
+  state.lastResult = value ? `Passcode set for ${child.name}.` : `Passcode removed for ${child.name}.`
   saveState()
   render()
 }
@@ -974,6 +1032,44 @@ function grantRewardToChild(childId, type, amount) {
 function toggleAdminPanel() {
   state.admin.showPanel = !state.admin.showPanel
   render()
+}
+
+function autoLockAdmin(showToast = true) {
+  if (adminInactivityTimer) {
+    clearTimeout(adminInactivityTimer)
+    adminInactivityTimer = null
+  }
+  if (!state.admin.unlocked) return
+  state.admin.unlocked = false
+  if (showToast) state.lastResult = 'Admin locked again.'
+  saveState()
+  render()
+}
+
+function resetAdminInactivityTimer() {
+  if (adminInactivityTimer) clearTimeout(adminInactivityTimer)
+  if (!state.admin.unlocked) return
+  adminInactivityTimer = window.setTimeout(() => autoLockAdmin(true), ADMIN_AUTOLOCK_MS)
+}
+
+function bindAdminAutoLock() {
+  if (adminAutoLockBound) return
+  adminAutoLockBound = true
+
+  ;['click', 'keydown', 'mousemove', 'touchstart'].forEach((eventName) => {
+    window.addEventListener(eventName, () => {
+      if (state.admin.unlocked) resetAdminInactivityTimer()
+    })
+  })
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) autoLockAdmin(false)
+  })
+
+  window.addEventListener('beforeunload', () => {
+    state.admin.unlocked = false
+    saveState()
+  })
 }
 
 function unlockAdmin() {
@@ -1062,7 +1158,7 @@ function renderProfileSelector() {
                     <div class="profile-avatar">${findItemById(child.equipped?.skin)?.icon || '🙂'}</div>
                     <strong>${child.name}</strong>
                     <span>Age ${child.settings?.age || 8} • ${child.settings?.difficulty || 'easy'}</span>
-                    <span>${childIsLocked(child) ? '🔒 Locked' : `⭐ Level ${child.profile?.level || 1}`}</span>
+                    <span>${childIsLocked(child) ? '🔒 Locked' : childNeedsLogin(child) ? '🔑 Passcode' : `⭐ Level ${child.profile?.level || 1}`}</span>
                   </button>
                 `,
               )
@@ -1093,10 +1189,12 @@ function renderHome() {
         <p class="hero-copy">A safe local-only learning adventure with puzzles, quests, badges, virtual items, and local friend connections between player profiles.</p>
         ${childIsLocked(child) ? `<div class="locked-message">🔒 This profile is paused by admin.</div>` : ''}
         ${childIsBanned(child) ? `<div class="locked-message">⛔ This profile is banned by admin. ${child.banReason}</div>` : ''}
+        ${childNeedsLogin(child) ? `<div class="locked-message">🔑 This profile needs its passcode before play.</div>` : ''}
         <div class="hero-actions">
           <button class="primary big" data-tab-target="play" ${childIsRestricted(child) ? 'disabled' : ''}>▶ Play Adventure</button>
           <button class="secondary big" data-tab-target="puzzles" ${childIsRestricted(child) ? 'disabled' : ''}>🧠 Solve Puzzles</button>
           <button class="secondary big" data-tab-target="friends" ${childIsRestricted(child) ? 'disabled' : ''}>🤝 Friends</button>
+          ${child.auth.passcode && child.auth.unlocked ? '<button class="secondary big" id="logout-child-profile">🔓 Logout</button>' : ''}
         </div>
       </div>
       <div class="avatar-showcase">
@@ -1470,8 +1568,33 @@ function renderParent() {
           <span>Safe local-only mode</span>
           <button class="toggle ${child.settings.safeLocalMode ? 'on' : ''}" id="toggle-safe" ${!state.admin.unlocked ? 'disabled' : ''}>${child.settings.safeLocalMode ? 'ON' : 'OFF'}</button>
         </label>
+        <label>
+          <span>Profile passcode</span>
+          <input id="child-passcode-setting" type="password" placeholder="Leave blank for no passcode" value="" ${!state.admin.unlocked ? 'disabled' : ''} />
+          <button class="secondary" id="save-child-passcode" ${!state.admin.unlocked ? 'disabled' : ''}>Save Passcode</button>
+        </label>
       </div>
       <div class="safe-note">🔒 Parent settings require admin unlock. Saves stay local only.</div>
+    </section>
+  `
+}
+
+function renderChildLoginPanel() {
+  const child = getCurrentChild()
+  if (!child || !childNeedsLogin(child) || childIsBanned(child)) return ''
+
+  return `
+    <section class="card admin-panel">
+      <div class="section-heading wrap">
+        <div>
+          <p class="eyebrow">Profile login</p>
+          <h2>Unlock ${child.name}</h2>
+        </div>
+      </div>
+      <div class="admin-login-row">
+        <input id="child-passcode" type="password" placeholder="Enter profile passcode" />
+        <button class="primary" id="unlock-child-profile">Login</button>
+      </div>
     </section>
   `
 }
@@ -1533,6 +1656,7 @@ function renderAdminPanel() {
                     <div>Age ${entry.settings.age} • ${entry.settings.difficulty} • ${entry.status}</div>
                     <div>Coins ${entry.profile.coins} • Stars ${entry.profile.stars} • Gems ${entry.profile.gems}</div>
                     <div>Friends ${entry.social.friends.length} • Incoming ${entry.social.incomingRequests.length} • Outgoing ${entry.social.outgoingRequests.length}</div>
+                    <div>${entry.auth.passcode ? '🔑 Passcode protected' : '🔓 No passcode set'}</div>
                     ${childIsBanned(entry) ? `<div class="admin-note">Ban reason: ${entry.banReason} • ${formatBanStatus(entry)}</div>` : ''}
                   </div>
                   <div class="admin-actions">
@@ -1572,6 +1696,7 @@ function render() {
     <div class="app-shell">
       ${renderNav()}
       <main class="main-content">
+        ${renderChildLoginPanel()}
         ${renderAdminPanel()}
         ${renderHome()}
         ${state.activeTab === 'play' ? renderPlay() : ''}
@@ -1595,6 +1720,9 @@ function bindEvents() {
 
   document.getElementById('open-admin')?.addEventListener('click', toggleAdminPanel)
   document.getElementById('unlock-admin')?.addEventListener('click', unlockAdmin)
+  document.getElementById('unlock-child-profile')?.addEventListener('click', loginCurrentChild)
+  document.getElementById('logout-child-profile')?.addEventListener('click', logoutCurrentChild)
+  document.getElementById('save-child-passcode')?.addEventListener('click', setCurrentChildPasscode)
   document.getElementById('admin-create-child')?.addEventListener('click', () => createChildProfileFromForm('admin'))
   document.getElementById('public-create-child')?.addEventListener('click', () => createChildProfileFromForm('public'))
 
