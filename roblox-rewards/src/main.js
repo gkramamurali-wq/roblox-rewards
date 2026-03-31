@@ -1,7 +1,7 @@
 import './style.css'
 
-const STORAGE_KEY = 'rewards-save-v6'
-const LEGACY_STORAGE_KEYS = ['rewards-save-v5', 'rewards-save-v4', 'roblox-rewards-save-v3']
+const STORAGE_KEY = 'rewards-save-v7'
+const LEGACY_STORAGE_KEYS = ['rewards-save-v6', 'rewards-save-v5', 'rewards-save-v4', 'roblox-rewards-save-v3']
 const DEFAULT_ADMIN_PASSCODE = '1234'
 const ADMIN_AUTOLOCK_MS = 60 * 1000
 
@@ -61,6 +61,9 @@ function createDefaultChildProfile(name = 'New Player', age = 8, difficulty = 'e
     status: 'active',
     banReason: '',
     banExpiresAt: null,
+    isOwner: false,
+    moderationNote: '',
+    inbox: [],
     auth: {
       passcode: '',
       unlocked: true,
@@ -218,6 +221,15 @@ function childIsRestricted(child) {
   return childIsLocked(child) || childIsBanned(child) || childNeedsLogin(child)
 }
 
+function currentChildIsOwner() {
+  return Boolean(getCurrentChild()?.isOwner)
+}
+
+function canOpenAdmin() {
+  const child = getCurrentChild()
+  return Boolean(child && child.isOwner && !childIsBanned(child))
+}
+
 function normalizeAllChildren() {
   state.childProfiles.forEach((child) => normalizeChild(child))
 }
@@ -260,6 +272,9 @@ function normalizeChild(child) {
     ...(child.auth || {}),
   }
 
+  child.isOwner = Boolean(child.isOwner)
+  child.moderationNote = child.moderationNote || ''
+  child.inbox = Array.isArray(child.inbox) ? child.inbox : []
   child.social.friends = Array.isArray(child.social.friends) ? child.social.friends : []
   child.social.incomingRequests = Array.isArray(child.social.incomingRequests) ? child.social.incomingRequests : []
   child.social.outgoingRequests = Array.isArray(child.social.outgoingRequests) ? child.social.outgoingRequests : []
@@ -559,6 +574,100 @@ function updateQuestProgress(questId, amount) {
   completeQuestIfReady(questId)
 }
 
+function createInboxMessage(type, text) {
+  return {
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    type,
+    text,
+    createdAt: Date.now(),
+    read: false,
+  }
+}
+
+function pushMessageToChild(child, type, text) {
+  child.inbox.unshift(createInboxMessage(type, text))
+  child.inbox = child.inbox.slice(0, 20)
+}
+
+function sendAdminNotice() {
+  if (!state.admin.unlocked || !canOpenAdmin()) return
+  const childId = document.getElementById('notice-target')?.value || ''
+  const message = document.getElementById('notice-message')?.value?.trim() || ''
+  const target = getChildById(childId)
+
+  if (!target || !message) {
+    state.lastResult = 'Choose a profile and enter a notice message.'
+    render()
+    return
+  }
+
+  pushMessageToChild(target, 'notice', message)
+  state.lastResult = `Notice sent to ${target.name}.`
+  saveState()
+  render()
+}
+
+function sendDirectMessage() {
+  if (!state.admin.unlocked || !canOpenAdmin()) return
+  const childId = document.getElementById('message-target')?.value || ''
+  const message = document.getElementById('message-body')?.value?.trim() || ''
+  const target = getChildById(childId)
+
+  if (!target || !message) {
+    state.lastResult = 'Choose a profile and enter a message.'
+    render()
+    return
+  }
+
+  pushMessageToChild(target, 'message', message)
+  state.lastResult = `Message sent to ${target.name}.`
+  saveState()
+  render()
+}
+
+function sendSystemAnnouncement() {
+  if (!state.admin.unlocked || !canOpenAdmin()) return
+  const message = document.getElementById('announcement-message')?.value?.trim() || ''
+  if (!message) {
+    state.lastResult = 'Enter an announcement message first.'
+    render()
+    return
+  }
+
+  state.childProfiles.forEach((child) => pushMessageToChild(child, 'announcement', message))
+  state.lastResult = 'System announcement sent to all profiles.'
+  saveState()
+  render()
+}
+
+function saveModerationNote() {
+  if (!state.admin.unlocked || !canOpenAdmin()) return
+  const childId = document.getElementById('moderation-target')?.value || ''
+  const note = document.getElementById('moderation-note')?.value?.trim() || ''
+  const target = getChildById(childId)
+
+  if (!target) {
+    state.lastResult = 'Choose a profile for the moderation note.'
+    render()
+    return
+  }
+
+  target.moderationNote = note
+  state.lastResult = note ? `Saved moderation note for ${target.name}.` : `Cleared moderation note for ${target.name}.`
+  saveState()
+  render()
+}
+
+function markInboxRead(messageId) {
+  const child = getCurrentChild()
+  if (!child) return
+  const msg = child.inbox.find((entry) => entry.id === messageId)
+  if (!msg) return
+  msg.read = true
+  saveState()
+  render()
+}
+
 function getFriendRequestStatus(currentChild, otherChildId) {
   if (!currentChild) return 'none'
   if (currentChild.id === otherChildId) return 'self'
@@ -841,6 +950,9 @@ function resetProfile(childId) {
   fresh.banExpiresAt = old.banExpiresAt || null
   fresh.auth.passcode = old.auth?.passcode || ''
   fresh.auth.unlocked = old.auth?.passcode ? false : true
+  fresh.isOwner = old.isOwner || false
+  fresh.moderationNote = old.moderationNote || ''
+  fresh.inbox = old.inbox || []
   state.childProfiles[childIndex] = fresh
   if (state.currentChildId === childId) normalizeCurrentChild()
   syncSocialLists()
@@ -852,7 +964,7 @@ function resetProfile(childId) {
 function removeProfile(childId) {
   const child = state.childProfiles.find((entry) => entry.id === childId)
   if (!child) return
-  if (!window.confirm(`Kick ${child.name} from this device? This deletes the local profile.`)) return
+  if (!window.confirm(`Delete ${child.name} from this device? This removes the local profile.`)) return
 
   state.childProfiles.forEach((entry) => {
     entry.social.friends = entry.social.friends.filter((id) => id !== childId)
@@ -863,7 +975,7 @@ function removeProfile(childId) {
   state.childProfiles = state.childProfiles.filter((entry) => entry.id !== childId)
   ensureCurrentChild()
   syncSocialLists()
-  state.lastResult = `Kicked ${child.name} from this device.`
+  state.lastResult = `Deleted ${child.name} from this device.`
   saveState()
   render()
 }
@@ -890,6 +1002,7 @@ function createChildProfileFromForm(prefix = 'public') {
   }
 
   const child = createDefaultChildProfile(name, age, difficulty)
+  if (!state.childProfiles.some((entry) => entry.isOwner)) child.isOwner = true
   lockAllProfilesExcept(child.id)
   state.childProfiles.push(child)
   state.currentChildId = child.id
@@ -927,6 +1040,26 @@ function setChildStatus(childId, status) {
   }
   if (status === 'banned' && state.currentChildId === childId) ensureCurrentChild()
   state.lastResult = `${child.name} is now ${status}.`
+  saveState()
+  render()
+}
+
+function toggleOwnerProfile() {
+  if (!state.admin.unlocked || !canOpenAdmin()) return
+  const childId = document.getElementById('owner-target')?.value || ''
+  const target = getChildById(childId)
+
+  if (!target) {
+    state.lastResult = 'Choose a profile to mark as owner.'
+    render()
+    return
+  }
+
+  state.childProfiles.forEach((child) => {
+    child.isOwner = child.id === childId
+  })
+
+  state.lastResult = `${target.name} is now the owner profile.`
   saveState()
   render()
 }
@@ -1072,6 +1205,12 @@ function grantRewardToChild(childId, type, amount) {
 }
 
 function toggleAdminPanel() {
+  if (!canOpenAdmin()) {
+    state.lastResult = 'Only the owner profile can open admin.'
+    render()
+    return
+  }
+
   state.admin.showPanel = !state.admin.showPanel
   render()
 }
@@ -1115,6 +1254,12 @@ function bindAdminAutoLock() {
 }
 
 function unlockAdmin() {
+  if (!canOpenAdmin()) {
+    state.lastResult = 'Only the owner profile can unlock admin.'
+    render()
+    return
+  }
+
   const input = document.getElementById('admin-passcode')?.value || ''
   if (input === state.admin.passcode) {
     state.admin.unlocked = true
@@ -1198,7 +1343,7 @@ function renderProfileSelector() {
                 (child) => `
                   <button class="profile-card ${state.currentChildId === child.id ? 'active' : ''}" data-switch-child="${child.id}">
                     <div class="profile-avatar">${findItemById(child.equipped?.skin)?.icon || '🙂'}</div>
-                    <strong>${child.name}</strong>
+                    <strong>${child.name} ${child.isOwner ? '👑' : ''}</strong>
                     <span>Age ${child.settings?.age || 8} • ${child.settings?.difficulty || 'easy'}</span>
                     <span>${childIsLocked(child) ? '🔒 Locked' : childNeedsLogin(child) ? '🔑 Passcode' : `⭐ Level ${child.profile?.level || 1}`}</span>
                   </button>
@@ -1206,6 +1351,26 @@ function renderProfileSelector() {
               )
               .join('')
           : '<div class="recent-item">No active child profiles yet. Create one below.</div>'}
+      </div>
+    </section>
+  `
+}
+
+function renderInbox(child) {
+  const inbox = child.inbox || []
+
+  return `
+    <section class="card rewards-preview">
+      <h2>Inbox</h2>
+      <div class="recent-list">
+        ${inbox.length
+          ? inbox.map((msg) => `
+              <div class="recent-item">
+                ${msg.read ? '📨' : '✉️'} <strong>${msg.type}</strong>: ${msg.text}
+                ${!msg.read ? `<div style="margin-top:8px;"><button class="secondary" data-mark-read="${msg.id}">Mark Read</button></div>` : ''}
+              </div>
+            `).join('')
+          : '<div class="recent-item">No messages yet.</div>'}
       </div>
     </section>
   `
@@ -1229,9 +1394,11 @@ function renderHome() {
         <p class="eyebrow">Learn. Play. Unlock cool stuff.</p>
         <h1>Welcome back, ${child.name}!</h1>
         <p class="hero-copy">A safe local-only learning adventure with puzzles, quests, badges, virtual items, and local friend connections between player profiles.</p>
+        ${child.isOwner ? '<div class="locked-message">👑 Owner profile</div>' : ''}
         ${childIsLocked(child) ? `<div class="locked-message">🔒 This profile is paused by admin.</div>` : ''}
         ${childIsBanned(child) ? `<div class="locked-message">⛔ This profile is banned by admin. ${child.banReason}</div>` : ''}
         ${childNeedsLogin(child) ? `<div class="locked-message">🔑 This profile needs its passcode before play.</div>` : ''}
+        ${child.moderationNote ? `<div class="locked-message">📝 Note: ${child.moderationNote}</div>` : ''}
         <div class="hero-actions">
           <button class="primary big" data-tab-target="play" ${childIsRestricted(child) ? 'disabled' : ''}>▶ Play Adventure</button>
           <button class="secondary big" data-tab-target="puzzles" ${childIsRestricted(child) ? 'disabled' : ''}>🧠 Solve Puzzles</button>
@@ -1288,14 +1455,7 @@ function renderHome() {
           .join('')}
       </div>
 
-      <div class="card rewards-preview">
-        <h2>Recent Rewards</h2>
-        <div class="recent-list">
-          ${(child.recentRewards.length ? child.recentRewards : ['Start playing to earn your first reward!'])
-            .map((entry) => `<div class="recent-item">🎁 ${entry}</div>`)
-            .join('')}
-        </div>
-      </div>
+      ${renderInbox(child)}
     </section>
   `
 }
@@ -1643,8 +1803,23 @@ function renderChildLoginPanel() {
 
 function renderAdminPanel() {
   const child = getCurrentChild()
+  const availableProfiles = state.childProfiles.filter((entry) => !childIsBanned(entry))
 
   if (!state.admin.showPanel) return ''
+
+  if (!canOpenAdmin()) {
+    return `
+      <section class="card admin-panel">
+        <div class="section-heading wrap">
+          <div>
+            <p class="eyebrow">Admin</p>
+            <h2>Owner profile required</h2>
+          </div>
+        </div>
+        <div class="admin-note">Switch to the owner profile to access admin.</div>
+      </section>
+    `
+  }
 
   if (!state.admin.unlocked) {
     return `
@@ -1655,6 +1830,7 @@ function renderAdminPanel() {
             <h2>Unlock admin panel</h2>
           </div>
         </div>
+        <div class="admin-note">Only the owner profile can unlock admin.</div>
         <div class="admin-login-row">
           <input id="admin-passcode" type="password" placeholder="Enter admin passcode" />
           <button class="primary" id="unlock-admin">Unlock</button>
@@ -1668,7 +1844,17 @@ function renderAdminPanel() {
       <div class="section-heading wrap">
         <div>
           <p class="eyebrow">Admin tools</p>
-          <h2>Rewards Admin Panel</h2>
+          <h2>Rewards Owner Panel</h2>
+        </div>
+      </div>
+
+      <div class="admin-section">
+        <h3>Owner mode</h3>
+        <div class="admin-create-grid">
+          <select id="owner-target">
+            ${availableProfiles.map((entry) => `<option value="${entry.id}" ${entry.isOwner ? 'selected' : ''}>${entry.name}</option>`).join('')}
+          </select>
+          <button class="primary" id="set-owner-profile">Make Owner Profile</button>
         </div>
       </div>
 
@@ -1679,6 +1865,50 @@ function renderAdminPanel() {
           <input id="admin-new-passcode" type="password" placeholder="New admin passcode" />
           <input id="admin-confirm-passcode" type="password" placeholder="Confirm new admin passcode" />
           <button class="primary" id="change-admin-passcode">Save Admin Passcode</button>
+        </div>
+      </div>
+
+      <div class="admin-section">
+        <h3>Admin notice panel</h3>
+        <div class="admin-create-grid">
+          <select id="notice-target">
+            <option value="">Choose profile</option>
+            ${availableProfiles.map((entry) => `<option value="${entry.id}">${entry.name}</option>`).join('')}
+          </select>
+          <input id="notice-message" type="text" placeholder="Short admin notice" />
+          <button class="primary" id="send-admin-notice">Send Notice</button>
+        </div>
+      </div>
+
+      <div class="admin-section">
+        <h3>Message panel</h3>
+        <div class="admin-create-grid">
+          <select id="message-target">
+            <option value="">Choose profile</option>
+            ${availableProfiles.map((entry) => `<option value="${entry.id}">${entry.name}</option>`).join('')}
+          </select>
+          <input id="message-body" type="text" placeholder="Direct message to selected profile" />
+          <button class="primary" id="send-direct-message">Send Message</button>
+        </div>
+      </div>
+
+      <div class="admin-section">
+        <h3>System announce panel</h3>
+        <div class="admin-create-grid">
+          <input id="announcement-message" type="text" placeholder="Announcement for all profiles" />
+          <button class="primary" id="send-system-announcement">Send Announcement</button>
+        </div>
+      </div>
+
+      <div class="admin-section">
+        <h3>Moderation note</h3>
+        <div class="admin-create-grid">
+          <select id="moderation-target">
+            <option value="">Choose profile</option>
+            ${availableProfiles.map((entry) => `<option value="${entry.id}">${entry.name}</option>`).join('')}
+          </select>
+          <input id="moderation-note" type="text" placeholder="Internal note shown on that profile" />
+          <button class="primary" id="save-moderation-note">Save Note</button>
         </div>
       </div>
 
@@ -1704,11 +1934,12 @@ function renderAdminPanel() {
               (entry) => `
                 <div class="admin-child-card ${state.currentChildId === entry.id ? 'active' : ''}">
                   <div>
-                    <strong>${entry.name}</strong>
+                    <strong>${entry.name} ${entry.isOwner ? '👑' : ''}</strong>
                     <div>Age ${entry.settings.age} • ${entry.settings.difficulty} • ${entry.status}</div>
                     <div>Coins ${entry.profile.coins} • Stars ${entry.profile.stars} • Gems ${entry.profile.gems}</div>
                     <div>Friends ${entry.social.friends.length} • Incoming ${entry.social.incomingRequests.length} • Outgoing ${entry.social.outgoingRequests.length}</div>
                     <div>${entry.auth.passcode ? '🔑 Passcode protected' : '🔓 No passcode set'}</div>
+                    ${entry.moderationNote ? `<div class="admin-note">Note: ${entry.moderationNote}</div>` : ''}
                     ${childIsBanned(entry) ? `<div class="admin-note">Ban reason: ${entry.banReason} • ${formatBanStatus(entry)}</div>` : ''}
                   </div>
                   <div class="admin-actions">
@@ -1720,7 +1951,7 @@ function renderAdminPanel() {
                     <button class="secondary" data-admin-give="${entry.id}" data-give-type="coins">+20 Coins</button>
                     <button class="secondary" data-admin-give="${entry.id}" data-give-type="stars">+10 Stars</button>
                     <button class="secondary" data-admin-reset="${entry.id}">Reset</button>
-                    <button class="secondary danger" data-admin-delete="${entry.id}">Kick</button>
+                    <button class="secondary danger" data-admin-delete="${entry.id}">Delete</button>
                   </div>
                   ${!childIsBanned(entry) ? `
                     <input id="ban-reason-${entry.id}" type="text" placeholder="Reason if banning this profile" />
@@ -1736,7 +1967,7 @@ function renderAdminPanel() {
       ${child ? `
         <div class="admin-section">
           <h3>Current child: ${child.name}</h3>
-          <div class="admin-note">Status: ${child.status}. Lock pauses access. Ban hides the profile from the child picker. Kick deletes the local profile from this device.</div>
+          <div class="admin-note">Status: ${child.status}. Owner mode gates admin access. Notices, messages, announcements, and moderation notes are local-only inbox features.</div>
         </div>
       ` : ''}
     </section>
@@ -1773,11 +2004,20 @@ function bindEvents() {
   document.getElementById('open-admin')?.addEventListener('click', toggleAdminPanel)
   document.getElementById('unlock-admin')?.addEventListener('click', unlockAdmin)
   document.getElementById('change-admin-passcode')?.addEventListener('click', changeAdminPasscode)
+  document.getElementById('set-owner-profile')?.addEventListener('click', toggleOwnerProfile)
+  document.getElementById('send-admin-notice')?.addEventListener('click', sendAdminNotice)
+  document.getElementById('send-direct-message')?.addEventListener('click', sendDirectMessage)
+  document.getElementById('send-system-announcement')?.addEventListener('click', sendSystemAnnouncement)
+  document.getElementById('save-moderation-note')?.addEventListener('click', saveModerationNote)
   document.getElementById('unlock-child-profile')?.addEventListener('click', loginCurrentChild)
   document.getElementById('logout-child-profile')?.addEventListener('click', logoutCurrentChild)
   document.getElementById('save-child-passcode')?.addEventListener('click', setCurrentChildPasscode)
   document.getElementById('admin-create-child')?.addEventListener('click', () => createChildProfileFromForm('admin'))
   document.getElementById('public-create-child')?.addEventListener('click', () => createChildProfileFromForm('public'))
+
+  document.querySelectorAll('[data-mark-read]').forEach((button) => {
+    button.addEventListener('click', () => markInboxRead(button.dataset.markRead))
+  })
 
   document.querySelectorAll('[data-admin-switch]').forEach((button) => {
     button.addEventListener('click', () => switchChildProfile(button.dataset.adminSwitch))
