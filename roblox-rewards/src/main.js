@@ -58,6 +58,7 @@ function createDefaultChildProfile(name = 'New Player', age = 8, difficulty = 'e
     name,
     status: 'active',
     banReason: '',
+    banExpiresAt: null,
     profile: {
       level: 1,
       stars: 0,
@@ -118,6 +119,7 @@ ensureCurrentChild()
 ensurePuzzle()
 normalizeAllChildren()
 normalizeCurrentChild()
+autoExpireBans()
 
 const app = document.querySelector('#app')
 let keyboardBound = false
@@ -227,6 +229,7 @@ function normalizeChild(child) {
 
   child.status = child.status || 'active'
   child.banReason = child.banReason || ''
+  child.banExpiresAt = child.banExpiresAt || null
   child.quests = Array.isArray(child.quests) ? child.quests : createDefaultChildProfile().quests
   child.unlockedItems = Array.isArray(child.unlockedItems) ? child.unlockedItems : ['hat-sun']
   child.recentRewards = Array.isArray(child.recentRewards) ? child.recentRewards : []
@@ -239,6 +242,24 @@ function normalizeChild(child) {
 
 function normalizeCurrentChild() {
   normalizeChild(getCurrentChild())
+}
+
+function autoExpireBans() {
+  const now = Date.now()
+  let changed = false
+
+  state.childProfiles.forEach((child) => {
+    if (child.status === 'banned' && child.banExpiresAt && child.banExpiresAt <= now) {
+      child.status = 'active'
+      child.banReason = ''
+      child.banExpiresAt = null
+      changed = true
+    }
+  })
+
+  if (changed) {
+    saveState()
+  }
 }
 
 function rand(min, max) {
@@ -431,10 +452,6 @@ function setTab(tab) {
 
 function progressPercent(value, total) {
   return Math.max(0, Math.min(100, Math.round((value / total) * 100)))
-}
-
-function isUnlocked(itemId) {
-  return getCurrentChild()?.unlockedItems.includes(itemId)
 }
 
 function findItemById(itemId) {
@@ -764,6 +781,7 @@ function resetProfile(childId) {
   fresh.id = childId
   fresh.status = old.status
   fresh.banReason = old.banReason || ''
+  fresh.banExpiresAt = old.banExpiresAt || null
   state.childProfiles[childIndex] = fresh
   if (state.currentChildId === childId) normalizeCurrentChild()
   syncSocialLists()
@@ -775,6 +793,7 @@ function resetProfile(childId) {
 function removeProfile(childId) {
   const child = state.childProfiles.find((entry) => entry.id === childId)
   if (!child) return
+  if (!window.confirm(`Kick ${child.name} from this device? This deletes the local profile.`)) return
 
   state.childProfiles.forEach((entry) => {
     entry.social.friends = entry.social.friends.filter((id) => id !== childId)
@@ -785,7 +804,7 @@ function removeProfile(childId) {
   state.childProfiles = state.childProfiles.filter((entry) => entry.id !== childId)
   ensureCurrentChild()
   syncSocialLists()
-  state.lastResult = `Deleted profile for ${child.name}.`
+  state.lastResult = `Kicked ${child.name} from this device.`
   saveState()
   render()
 }
@@ -835,7 +854,10 @@ function setChildStatus(childId, status) {
   const child = state.childProfiles.find((entry) => entry.id === childId)
   if (!child) return
   child.status = status
-  if (status !== 'banned') child.banReason = ''
+  if (status !== 'banned') {
+    child.banReason = ''
+    child.banExpiresAt = null
+  }
   if (status === 'banned' && state.currentChildId === childId) ensureCurrentChild()
   state.lastResult = `${child.name} is now ${status}.`
   saveState()
@@ -845,11 +867,32 @@ function setChildStatus(childId, status) {
 function banChild(childId) {
   const child = state.childProfiles.find((entry) => entry.id === childId)
   if (!child) return
+  if (!window.confirm(`Ban ${child.name}? This removes them from pickers and clears friend links.`)) return
+
   const reasonInput = document.getElementById(`ban-reason-${childId}`)
+  const durationInput = document.getElementById(`ban-duration-${childId}`)
+  const durationMinutes = Number(durationInput?.value || 0)
+  const expiresAt = durationMinutes > 0 ? Date.now() + durationMinutes * 60 * 1000 : null
+
   child.status = 'banned'
   child.banReason = reasonInput?.value?.trim() || 'No reason added'
+  child.banExpiresAt = expiresAt
+
+  state.childProfiles.forEach((entry) => {
+    entry.social.friends = entry.social.friends.filter((id) => id !== childId)
+    entry.social.incomingRequests = entry.social.incomingRequests.filter((id) => id !== childId)
+    entry.social.outgoingRequests = entry.social.outgoingRequests.filter((id) => id !== childId)
+  })
+
+  child.social.friends = []
+  child.social.incomingRequests = []
+  child.social.outgoingRequests = []
+
+  syncSocialLists()
   if (state.currentChildId === childId) ensureCurrentChild()
-  state.lastResult = `${child.name} was banned.`
+  state.lastResult = durationMinutes > 0
+    ? `${child.name} was banned for ${durationMinutes} minutes.`
+    : `${child.name} was banned.`
   saveState()
   render()
 }
@@ -859,6 +902,7 @@ function unbanChild(childId) {
   if (!child) return
   child.status = 'active'
   child.banReason = ''
+  child.banExpiresAt = null
   if (!state.currentChildId) state.currentChildId = child.id
   state.lastResult = `${child.name} was unbanned.`
   saveState()
@@ -890,6 +934,14 @@ function unlockAdmin() {
   }
   saveState()
   render()
+}
+
+function formatBanStatus(child) {
+  if (!child.banExpiresAt) return 'Permanent ban'
+  const remainingMs = child.banExpiresAt - Date.now()
+  if (remainingMs <= 0) return 'Ban expiring...'
+  const remainingMinutes = Math.ceil(remainingMs / 60000)
+  return `Banned for ${remainingMinutes} more min`
 }
 
 function renderNav() {
@@ -1427,7 +1479,7 @@ function renderAdminPanel() {
                     <div>Age ${entry.settings.age} • ${entry.settings.difficulty} • ${entry.status}</div>
                     <div>Coins ${entry.profile.coins} • Stars ${entry.profile.stars} • Gems ${entry.profile.gems}</div>
                     <div>Friends ${entry.social.friends.length} • Incoming ${entry.social.incomingRequests.length} • Outgoing ${entry.social.outgoingRequests.length}</div>
-                    ${childIsBanned(entry) ? `<div class="admin-note">Ban reason: ${entry.banReason}</div>` : ''}
+                    ${childIsBanned(entry) ? `<div class="admin-note">Ban reason: ${entry.banReason} • ${formatBanStatus(entry)}</div>` : ''}
                   </div>
                   <div class="admin-actions">
                     ${!childIsBanned(entry) ? `<button class="secondary" data-admin-switch="${entry.id}">Open</button>` : ''}
@@ -1438,9 +1490,12 @@ function renderAdminPanel() {
                     <button class="secondary" data-admin-give="${entry.id}" data-give-type="coins">+20 Coins</button>
                     <button class="secondary" data-admin-give="${entry.id}" data-give-type="stars">+10 Stars</button>
                     <button class="secondary" data-admin-reset="${entry.id}">Reset</button>
-                    <button class="secondary danger" data-admin-delete="${entry.id}">Delete</button>
+                    <button class="secondary danger" data-admin-delete="${entry.id}">Kick</button>
                   </div>
-                  ${!childIsBanned(entry) ? `<input id="ban-reason-${entry.id}" type="text" placeholder="Reason if banning this profile" />` : ''}
+                  ${!childIsBanned(entry) ? `
+                    <input id="ban-reason-${entry.id}" type="text" placeholder="Reason if banning this profile" />
+                    <input id="ban-duration-${entry.id}" type="number" min="0" step="5" placeholder="Ban minutes (0 = permanent)" />
+                  ` : ''}
                 </div>
               `,
             )
@@ -1451,7 +1506,7 @@ function renderAdminPanel() {
       ${child ? `
         <div class="admin-section">
           <h3>Current child: ${child.name}</h3>
-          <div class="admin-note">Status: ${child.status}. Lock pauses access. Ban hides the profile from the child picker.</div>
+          <div class="admin-note">Status: ${child.status}. Lock pauses access. Ban hides the profile from the child picker. Kick deletes the local profile from this device.</div>
         </div>
       ` : ''}
     </section>
