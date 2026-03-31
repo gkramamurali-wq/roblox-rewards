@@ -203,7 +203,8 @@ h2 {
 .admin-actions,
 .admin-create-grid,
 .admin-login-row,
-.profile-grid {
+.profile-grid,
+.social-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
@@ -242,6 +243,13 @@ h2 {
   font-size: 2rem;
 }
 
+.profile-avatar.small {
+  width: 56px;
+  height: 56px;
+  margin: 0;
+  font-size: 1.6rem;
+}
+
 .avatar-gear {
   display: flex;
   justify-content: center;
@@ -261,7 +269,8 @@ h2 {
 .quest-top,
 .section-heading,
 .wallet,
-.game-status-row {
+.game-status-row,
+.social-top {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -314,7 +323,8 @@ h2 {
 .status-pill,
 .controls-note,
 .locked-message,
-.admin-note {
+.admin-note,
+.social-status {
   padding: 10px 14px;
   border-radius: 18px;
   background: #f1f7ff;
@@ -340,7 +350,9 @@ h2 {
 }
 
 .recent-list,
-.admin-child-list {
+.admin-child-list,
+.stack-list,
+.friends-column {
   display: grid;
   gap: 10px;
 }
@@ -399,7 +411,9 @@ h2 {
 
 .answer-grid,
 .shop-grid,
-.settings-grid {
+.settings-grid,
+.social-grid,
+.friends-layout {
   display: grid;
   gap: 14px;
 }
@@ -430,13 +444,15 @@ h2 {
 }
 
 .shop-grid,
-.profile-grid {
+.profile-grid,
+.social-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .shop-item,
 .profile-card,
-.admin-child-card {
+.admin-child-card,
+.social-card {
   padding: 18px;
   border-radius: 24px;
   background: linear-gradient(180deg, #f8fbff, #eef2ff);
@@ -454,6 +470,10 @@ h2 {
   background: linear-gradient(180deg, #fffbe6, #fff1f9);
 }
 
+.social-card.compact {
+  gap: 8px;
+}
+
 .shop-icon {
   font-size: 2rem;
 }
@@ -462,6 +482,11 @@ h2 {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.friends-layout {
+  grid-template-columns: 1.3fr 0.9fr;
+  margin-top: 16px;
 }
 
 .settings-grid {
@@ -514,14 +539,16 @@ input[type='range'] {
 @media (max-width: 900px) {
   .hero-panel,
   .dashboard-grid,
-  .puzzle-card-inner {
+  .puzzle-card-inner,
+  .friends-layout {
     grid-template-columns: 1fr;
   }
 
   .top-nav,
   .section-heading,
   .quest-top,
-  .stat-row {
+  .stat-row,
+  .social-top {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -544,7 +571,8 @@ input[type='range'] {
   .play-controls,
   .admin-actions,
   .admin-create-grid,
-  .admin-login-row {
+  .admin-login-row,
+  .social-actions {
     flex-direction: column;
   }
 
@@ -554,7 +582,8 @@ input[type='range'] {
   .play-controls > button,
   .admin-actions > button,
   .admin-create-grid > *,
-  .admin-login-row > * {
+  .admin-login-row > *,
+  .social-actions > button {
     width: 100%;
   }
 }

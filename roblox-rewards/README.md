@@ -1,4 +1,4 @@
-# Roblox Rewards
+# Rewards
 
 A local-only kid-friendly web app prototype built with Vite and vanilla JavaScript.
 
@@ -7,25 +7,17 @@ A local-only kid-friendly web app prototype built with Vite and vanilla JavaScri
 - Bright, playful web UI inspired by kid-friendly obstacle/adventure games
 - Math and English puzzle area
 - Reward shop for virtual in-app items only
+- Local friend system between child profiles on the same browser
 - Parent settings for age, difficulty, sound, and local-only mode
 - Runs fully local in the browser
 
 ## Safety notes
 
-- No Roblox login
-- No Robux generation claims
+- No third-party login
 - No account connection
 - No unsafe downloads required
 - Local browser app only
-
-## Milestone plan
-
-1. Project structure ✅
-2. Clickable UI prototype ✅
-3. Puzzle engine ✅
-4. Rewards and unlocks ✅
-5. Save/progress ✅
-6. Run guide ✅
+- Friend requests and friendships stay in browser localStorage
 
 ## Implemented now
 
@@ -34,7 +26,8 @@ A local-only kid-friendly web app prototype built with Vite and vanilla JavaScri
 - Correct answers award coins, stars, XP, and occasional gems
 - Quest progress updates as the child plays
 - Shop items can be unlocked and equipped
-- Progress is saved in browser localStorage
+- Child profiles can send, accept, reject, cancel, and remove local friend connections
+- Progress and friends are saved in browser localStorage
 - Parent page includes a reset-local-save button
 
 ## Run locally
@@ -46,7 +39,7 @@ npm run dev -- --host
 
 Then open the local URL shown by Vite in your browser.
 
-On Windows with Ubuntu WSL, usually open:
+Usually:
 
 - `http://localhost:5173`
 

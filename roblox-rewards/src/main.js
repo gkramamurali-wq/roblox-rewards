@@ -1,6 +1,6 @@
 import './style.css'
 
-const STORAGE_KEY = 'roblox-rewards-save-v3'
+const STORAGE_KEY = 'rewards-save-v4'
 const ADMIN_PASSCODE = '1234'
 
 const rewardsCatalog = {
@@ -76,6 +76,11 @@ function createDefaultChildProfile(name = 'New Player', age = 8, difficulty = 'e
       safeLocalMode: true,
       timeLimit: 20,
     },
+    social: {
+      friends: [],
+      incomingRequests: [],
+      outgoingRequests: [],
+    },
     quests: [
       { id: 'math', title: 'Solve 3 math puzzles', progress: 0, total: 3, reward: { coins: 10 } },
       { id: 'english', title: 'Finish 2 word challenges', progress: 0, total: 2, reward: { gems: 1 } },
@@ -111,6 +116,7 @@ const defaultState = {
 let state = loadState()
 ensureCurrentChild()
 ensurePuzzle()
+normalizeAllChildren()
 normalizeCurrentChild()
 
 const app = document.querySelector('#app')
@@ -153,6 +159,10 @@ function getCurrentChild() {
   return state.childProfiles.find((child) => child.id === state.currentChildId) || null
 }
 
+function getChildById(childId) {
+  return state.childProfiles.find((child) => child.id === childId) || null
+}
+
 function childIsLocked(child) {
   return child?.status === 'locked'
 }
@@ -165,8 +175,11 @@ function childIsRestricted(child) {
   return childIsLocked(child) || childIsBanned(child)
 }
 
-function normalizeCurrentChild() {
-  const child = getCurrentChild()
+function normalizeAllChildren() {
+  state.childProfiles.forEach((child) => normalizeChild(child))
+}
+
+function normalizeChild(child) {
   if (!child) return
 
   child.settings = {
@@ -191,6 +204,17 @@ function normalizeCurrentChild() {
     ...(child.profile || {}),
   }
 
+  child.social = {
+    friends: [],
+    incomingRequests: [],
+    outgoingRequests: [],
+    ...(child.social || {}),
+  }
+
+  child.social.friends = Array.isArray(child.social.friends) ? child.social.friends : []
+  child.social.incomingRequests = Array.isArray(child.social.incomingRequests) ? child.social.incomingRequests : []
+  child.social.outgoingRequests = Array.isArray(child.social.outgoingRequests) ? child.social.outgoingRequests : []
+
   child.equipped = {
     hat: 'hat-sun',
     glasses: null,
@@ -211,6 +235,10 @@ function normalizeCurrentChild() {
     ...(child.game || {}),
     position: { ...structuredClone(baseGame).position, ...(child.game?.position || {}) },
   }
+}
+
+function normalizeCurrentChild() {
+  normalizeChild(getCurrentChild())
 }
 
 function rand(min, max) {
@@ -463,6 +491,125 @@ function updateQuestProgress(questId, amount) {
   completeQuestIfReady(questId)
 }
 
+function getFriendRequestStatus(currentChild, otherChildId) {
+  if (!currentChild) return 'none'
+  if (currentChild.id === otherChildId) return 'self'
+  if (currentChild.social.friends.includes(otherChildId)) return 'friends'
+  if (currentChild.social.outgoingRequests.includes(otherChildId)) return 'outgoing'
+  if (currentChild.social.incomingRequests.includes(otherChildId)) return 'incoming'
+  return 'none'
+}
+
+function syncSocialLists() {
+  const validIds = new Set(state.childProfiles.map((child) => child.id))
+
+  state.childProfiles.forEach((child) => {
+    child.social.friends = child.social.friends.filter((id) => id !== child.id && validIds.has(id))
+    child.social.incomingRequests = child.social.incomingRequests.filter((id) => id !== child.id && validIds.has(id))
+    child.social.outgoingRequests = child.social.outgoingRequests.filter((id) => id !== child.id && validIds.has(id))
+
+    child.social.friends = [...new Set(child.social.friends)]
+    child.social.incomingRequests = [...new Set(child.social.incomingRequests)]
+    child.social.outgoingRequests = [...new Set(child.social.outgoingRequests)]
+  })
+}
+
+function sendFriendRequest(targetId) {
+  const child = getCurrentChild()
+  const target = getChildById(targetId)
+
+  if (!child || !target) return
+  if (child.id === targetId) {
+    state.lastResult = 'You cannot send a friend request to yourself.'
+    render()
+    return
+  }
+  if (childIsBanned(target)) {
+    state.lastResult = 'That player is not available for friends right now.'
+    render()
+    return
+  }
+
+  const status = getFriendRequestStatus(child, targetId)
+  if (status === 'friends') {
+    state.lastResult = `${target.name} is already your friend.`
+    render()
+    return
+  }
+  if (status === 'outgoing') {
+    state.lastResult = `Friend request already sent to ${target.name}.`
+    render()
+    return
+  }
+  if (status === 'incoming') {
+    acceptFriendRequest(targetId)
+    return
+  }
+
+  child.social.outgoingRequests.push(targetId)
+  target.social.incomingRequests.push(child.id)
+  syncSocialLists()
+  state.lastResult = `Friend request sent to ${target.name}.`
+  saveState()
+  render()
+}
+
+function cancelFriendRequest(targetId) {
+  const child = getCurrentChild()
+  const target = getChildById(targetId)
+  if (!child || !target) return
+
+  child.social.outgoingRequests = child.social.outgoingRequests.filter((id) => id !== targetId)
+  target.social.incomingRequests = target.social.incomingRequests.filter((id) => id !== child.id)
+  syncSocialLists()
+  state.lastResult = `Cancelled request to ${target.name}.`
+  saveState()
+  render()
+}
+
+function acceptFriendRequest(senderId) {
+  const child = getCurrentChild()
+  const sender = getChildById(senderId)
+  if (!child || !sender) return
+
+  child.social.incomingRequests = child.social.incomingRequests.filter((id) => id !== senderId)
+  sender.social.outgoingRequests = sender.social.outgoingRequests.filter((id) => id !== child.id)
+
+  if (!child.social.friends.includes(senderId)) child.social.friends.push(senderId)
+  if (!sender.social.friends.includes(child.id)) sender.social.friends.push(child.id)
+
+  syncSocialLists()
+  state.lastResult = `You and ${sender.name} are now friends!`
+  saveState()
+  render()
+}
+
+function rejectFriendRequest(senderId) {
+  const child = getCurrentChild()
+  const sender = getChildById(senderId)
+  if (!child || !sender) return
+
+  child.social.incomingRequests = child.social.incomingRequests.filter((id) => id !== senderId)
+  sender.social.outgoingRequests = sender.social.outgoingRequests.filter((id) => id !== child.id)
+  syncSocialLists()
+  state.lastResult = `Rejected ${sender.name}'s friend request.`
+  saveState()
+  render()
+}
+
+function unfriendChild(friendId) {
+  const child = getCurrentChild()
+  const friend = getChildById(friendId)
+  if (!child || !friend) return
+
+  child.social.friends = child.social.friends.filter((id) => id !== friendId)
+  friend.social.friends = friend.social.friends.filter((id) => id !== child.id)
+  syncSocialLists()
+  state.lastResult = `You are no longer friends with ${friend.name}.`
+  saveState()
+  render()
+}
+
 function answerPuzzle(option) {
   const child = getCurrentChild()
   if (!child || childIsRestricted(child)) return
@@ -619,6 +766,7 @@ function resetProfile(childId) {
   fresh.banReason = old.banReason || ''
   state.childProfiles[childIndex] = fresh
   if (state.currentChildId === childId) normalizeCurrentChild()
+  syncSocialLists()
   state.lastResult = `Reset profile for ${old.name}.`
   saveState()
   render()
@@ -627,8 +775,16 @@ function resetProfile(childId) {
 function removeProfile(childId) {
   const child = state.childProfiles.find((entry) => entry.id === childId)
   if (!child) return
+
+  state.childProfiles.forEach((entry) => {
+    entry.social.friends = entry.social.friends.filter((id) => id !== childId)
+    entry.social.incomingRequests = entry.social.incomingRequests.filter((id) => id !== childId)
+    entry.social.outgoingRequests = entry.social.outgoingRequests.filter((id) => id !== childId)
+  })
+
   state.childProfiles = state.childProfiles.filter((entry) => entry.id !== childId)
   ensureCurrentChild()
+  syncSocialLists()
   state.lastResult = `Deleted profile for ${child.name}.`
   saveState()
   render()
@@ -652,6 +808,7 @@ function createChildProfileFromForm(prefix = 'public') {
   const child = createDefaultChildProfile(name, age, difficulty)
   state.childProfiles.push(child)
   state.currentChildId = child.id
+  syncSocialLists()
   state.lastResult = `Created profile for ${name}.`
   saveState()
   render()
@@ -740,13 +897,14 @@ function renderNav() {
     ['home', 'Home'],
     ['play', 'Play'],
     ['puzzles', 'Puzzles'],
+    ['friends', 'Friends'],
     ['shop', 'Shop'],
     ['parent', 'Parent Settings'],
   ]
 
   return `
     <nav class="top-nav">
-      <div class="brand">🎮 Roblox Rewards</div>
+      <div class="brand">🎮 Rewards</div>
       <div class="nav-buttons">
         ${tabs.map(([id, label]) => `<button class="nav-btn ${state.activeTab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`).join('')}
         <button class="nav-btn admin-trigger" id="open-admin">🔐 Admin</button>
@@ -826,12 +984,13 @@ function renderHome() {
       <div>
         <p class="eyebrow">Learn. Play. Unlock cool stuff.</p>
         <h1>Welcome back, ${child.name}!</h1>
-        <p class="hero-copy">A safe local-only learning adventure with puzzles, quests, badges, and virtual items — no Roblox account needed.</p>
+        <p class="hero-copy">A safe local-only learning adventure with puzzles, quests, badges, virtual items, and local friend connections between player profiles.</p>
         ${childIsLocked(child) ? `<div class="locked-message">🔒 This profile is paused by admin.</div>` : ''}
         ${childIsBanned(child) ? `<div class="locked-message">⛔ This profile is banned by admin. ${child.banReason}</div>` : ''}
         <div class="hero-actions">
           <button class="primary big" data-tab-target="play" ${childIsRestricted(child) ? 'disabled' : ''}>▶ Play Adventure</button>
           <button class="secondary big" data-tab-target="puzzles" ${childIsRestricted(child) ? 'disabled' : ''}>🧠 Solve Puzzles</button>
+          <button class="secondary big" data-tab-target="friends" ${childIsRestricted(child) ? 'disabled' : ''}>🤝 Friends</button>
         </div>
       </div>
       <div class="avatar-showcase">
@@ -862,6 +1021,7 @@ function renderHome() {
         <div class="mini-stats">
           <span>🎯 Accuracy: ${accuracy}%</span>
           <span>🔥 Streak: ${child.profile.streak}</span>
+          <span>🤝 Friends: ${child.social.friends.length}</span>
         </div>
       </div>
 
@@ -1010,6 +1170,114 @@ function renderPuzzles() {
   `
 }
 
+function renderFriends() {
+  const child = getCurrentChild()
+  if (!child) return ''
+
+  const otherProfiles = state.childProfiles.filter((entry) => entry.id !== child.id && !childIsBanned(entry))
+  const incoming = child.social.incomingRequests.map(getChildById).filter(Boolean)
+  const outgoing = child.social.outgoingRequests.map(getChildById).filter(Boolean)
+  const friends = child.social.friends.map(getChildById).filter(Boolean)
+
+  return `
+    <section class="card friends-panel ${childIsRestricted(child) ? 'locked-panel' : ''}">
+      <div class="section-heading wrap">
+        <div>
+          <p class="eyebrow">Social</p>
+          <h2>Friends</h2>
+        </div>
+        <div class="wallet">🤝 ${friends.length} friend${friends.length === 1 ? '' : 's'}</div>
+      </div>
+      <p>Connect local player profiles together. Requests, accepts, rejects, and friendships all save in this browser.</p>
+
+      <div class="friends-layout">
+        <div class="friends-column">
+          <h3>Find players</h3>
+          <div class="social-grid">
+            ${otherProfiles.length
+              ? otherProfiles.map((entry) => {
+                  const status = getFriendRequestStatus(child, entry.id)
+                  return `
+                    <div class="social-card">
+                      <div class="social-top">
+                        <div class="profile-avatar small">${findItemById(entry.equipped?.skin)?.icon || '🙂'}</div>
+                        <div>
+                          <strong>${entry.name}</strong>
+                          <div>Level ${entry.profile.level} • Age ${entry.settings.age}</div>
+                        </div>
+                      </div>
+                      <div class="social-actions">
+                        ${status === 'none' ? `<button class="primary" data-friend-send="${entry.id}" ${childIsRestricted(child) ? 'disabled' : ''}>Add Friend</button>` : ''}
+                        ${status === 'outgoing' ? `<button class="secondary" data-friend-cancel="${entry.id}" ${childIsRestricted(child) ? 'disabled' : ''}>Cancel Request</button>` : ''}
+                        ${status === 'incoming' ? `
+                          <button class="primary" data-friend-accept="${entry.id}" ${childIsRestricted(child) ? 'disabled' : ''}>Accept</button>
+                          <button class="secondary" data-friend-reject="${entry.id}" ${childIsRestricted(child) ? 'disabled' : ''}>Reject</button>
+                        ` : ''}
+                        ${status === 'friends' ? `<button class="secondary" data-friend-remove="${entry.id}" ${childIsRestricted(child) ? 'disabled' : ''}>Unfriend</button>` : ''}
+                      </div>
+                      <div class="social-status">${
+                        status === 'none' ? 'Not friends yet' :
+                        status === 'outgoing' ? 'Request sent' :
+                        status === 'incoming' ? 'Sent you a request' :
+                        'Already friends'
+                      }</div>
+                    </div>
+                  `
+                }).join('')
+              : '<div class="recent-item">Create another profile to try the friend system.</div>'}
+          </div>
+        </div>
+
+        <div class="friends-column">
+          <h3>Incoming requests</h3>
+          <div class="stack-list">
+            ${incoming.length
+              ? incoming.map((entry) => `
+                  <div class="social-card compact">
+                    <strong>${entry.name}</strong>
+                    <div class="social-actions">
+                      <button class="primary" data-friend-accept="${entry.id}" ${childIsRestricted(child) ? 'disabled' : ''}>Accept</button>
+                      <button class="secondary" data-friend-reject="${entry.id}" ${childIsRestricted(child) ? 'disabled' : ''}>Reject</button>
+                    </div>
+                  </div>
+                `).join('')
+              : '<div class="recent-item">No incoming requests.</div>'}
+          </div>
+
+          <h3>Outgoing requests</h3>
+          <div class="stack-list">
+            ${outgoing.length
+              ? outgoing.map((entry) => `
+                  <div class="social-card compact">
+                    <strong>${entry.name}</strong>
+                    <div class="social-actions">
+                      <button class="secondary" data-friend-cancel="${entry.id}" ${childIsRestricted(child) ? 'disabled' : ''}>Cancel</button>
+                    </div>
+                  </div>
+                `).join('')
+              : '<div class="recent-item">No outgoing requests.</div>'}
+          </div>
+
+          <h3>Friends list</h3>
+          <div class="stack-list">
+            ${friends.length
+              ? friends.map((entry) => `
+                  <div class="social-card compact">
+                    <strong>${entry.name}</strong>
+                    <div>Level ${entry.profile.level} • ${entry.profile.coins} coins</div>
+                    <div class="social-actions">
+                      <button class="secondary" data-friend-remove="${entry.id}" ${childIsRestricted(child) ? 'disabled' : ''}>Unfriend</button>
+                    </div>
+                  </div>
+                `).join('')
+              : '<div class="recent-item">No friends yet.</div>'}
+          </div>
+        </div>
+      </div>
+    </section>
+  `
+}
+
 function renderShop() {
   const child = getCurrentChild()
   if (!child) return ''
@@ -1129,7 +1397,7 @@ function renderAdminPanel() {
       <div class="section-heading wrap">
         <div>
           <p class="eyebrow">Admin tools</p>
-          <h2>Aarav Admin Panel</h2>
+          <h2>Rewards Admin Panel</h2>
         </div>
       </div>
 
@@ -1158,6 +1426,7 @@ function renderAdminPanel() {
                     <strong>${entry.name}</strong>
                     <div>Age ${entry.settings.age} • ${entry.settings.difficulty} • ${entry.status}</div>
                     <div>Coins ${entry.profile.coins} • Stars ${entry.profile.stars} • Gems ${entry.profile.gems}</div>
+                    <div>Friends ${entry.social.friends.length} • Incoming ${entry.social.incomingRequests.length} • Outgoing ${entry.social.outgoingRequests.length}</div>
                     ${childIsBanned(entry) ? `<div class="admin-note">Ban reason: ${entry.banReason}</div>` : ''}
                   </div>
                   <div class="admin-actions">
@@ -1198,6 +1467,7 @@ function render() {
         ${renderHome()}
         ${state.activeTab === 'play' ? renderPlay() : ''}
         ${state.activeTab === 'puzzles' ? renderPuzzles() : ''}
+        ${state.activeTab === 'friends' ? renderFriends() : ''}
         ${state.activeTab === 'shop' ? renderShop() : ''}
         ${state.activeTab === 'parent' ? renderParent() : ''}
         ${state.lastResult ? `<section class="toast">${state.lastResult}</section>` : ''}
@@ -1285,6 +1555,26 @@ function bindEvents() {
       if (move === 'down') movePlayer(1, 1)
       if (move === 'boost') movePlayer(2, 0)
     })
+  })
+
+  document.querySelectorAll('[data-friend-send]').forEach((button) => {
+    button.addEventListener('click', () => sendFriendRequest(button.dataset.friendSend))
+  })
+
+  document.querySelectorAll('[data-friend-cancel]').forEach((button) => {
+    button.addEventListener('click', () => cancelFriendRequest(button.dataset.friendCancel))
+  })
+
+  document.querySelectorAll('[data-friend-accept]').forEach((button) => {
+    button.addEventListener('click', () => acceptFriendRequest(button.dataset.friendAccept))
+  })
+
+  document.querySelectorAll('[data-friend-reject]').forEach((button) => {
+    button.addEventListener('click', () => rejectFriendRequest(button.dataset.friendReject))
+  })
+
+  document.querySelectorAll('[data-friend-remove]').forEach((button) => {
+    button.addEventListener('click', () => unfriendChild(button.dataset.friendRemove))
   })
 
   document.getElementById('reset-mini-game')?.addEventListener('click', () => {
