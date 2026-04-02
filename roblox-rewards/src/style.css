@@ -352,9 +352,42 @@ h2 {
 .recent-list,
 .admin-child-list,
 .stack-list,
-.friends-column {
+.friends-column,
+.history-list {
   display: grid;
   gap: 10px;
+}
+
+.history-item {
+  padding: 14px;
+  border-radius: 18px;
+  background: #f7fbff;
+  border: 2px solid #dbe9ff;
+}
+
+.history-item.content {
+  border-color: #ffd6ea;
+  background: #fff8fc;
+}
+
+.history-top,
+.history-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.history-meta {
+  margin-top: 6px;
+  color: #5d7099;
+  font-weight: 700;
+}
+
+.history-details {
+  margin-top: 8px;
+  color: #31486f;
+  font-weight: 700;
 }
 
 .hint-text,

@@ -64,6 +64,8 @@ function createDefaultChildProfile(name = 'New Player', age = 8, difficulty = 'e
     isOwner: false,
     moderationNote: '',
     inbox: [],
+    contentHistory: [],
+    activityHistory: [],
     auth: {
       passcode: '',
       unlocked: true,
@@ -121,6 +123,7 @@ const defaultState = {
     showPanel: false,
     passcode: DEFAULT_ADMIN_PASSCODE,
   },
+  activityLog: [],
   childProfiles: [],
 }
 
@@ -160,6 +163,7 @@ function loadState() {
           unlocked: false,
           passcode: parsed.admin?.passcode || DEFAULT_ADMIN_PASSCODE,
         },
+        activityLog: Array.isArray(parsed.activityLog) ? parsed.activityLog : [],
         childProfiles: Array.isArray(parsed.childProfiles) ? parsed.childProfiles : [],
       }
     } catch {
@@ -275,6 +279,8 @@ function normalizeChild(child) {
   child.isOwner = Boolean(child.isOwner)
   child.moderationNote = child.moderationNote || ''
   child.inbox = Array.isArray(child.inbox) ? child.inbox : []
+  child.contentHistory = Array.isArray(child.contentHistory) ? child.contentHistory : []
+  child.activityHistory = Array.isArray(child.activityHistory) ? child.activityHistory : []
   child.social.friends = Array.isArray(child.social.friends) ? child.social.friends : []
   child.social.incomingRequests = Array.isArray(child.social.incomingRequests) ? child.social.incomingRequests : []
   child.social.outgoingRequests = Array.isArray(child.social.outgoingRequests) ? child.social.outgoingRequests : []
@@ -316,6 +322,7 @@ function autoExpireBans() {
       child.status = 'active'
       child.banReason = ''
       child.banExpiresAt = null
+      logChildAction(child, 'ban-auto-expired')
       changed = true
     }
   })
@@ -514,6 +521,7 @@ function resetMiniGame() {
   const child = getCurrentChild()
   if (!child) return
   child.game = structuredClone(baseGame)
+  logChildContent(child, 'adventure-reset')
 }
 
 function progressPercent(value, total) {
@@ -534,6 +542,42 @@ function addRecentReward(text) {
   child.recentRewards = [text, ...child.recentRewards].slice(0, 5)
 }
 
+function createHistoryEntry(kind, action, details = {}) {
+  return {
+    id: `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    action,
+    createdAt: Date.now(),
+    actorId: state.currentChildId || null,
+    actorName: getCurrentChild()?.name || (state.admin.unlocked ? 'Owner Admin' : 'System'),
+    ...details,
+  }
+}
+
+function pushGlobalActivity(action, details = {}) {
+  state.activityLog = [createHistoryEntry('activity', action, details), ...(state.activityLog || [])].slice(0, 300)
+}
+
+function pushChildActivity(child, action, details = {}) {
+  if (!child) return
+  child.activityHistory = [createHistoryEntry('activity', action, { targetChildId: child.id, targetChildName: child.name, ...details }), ...(child.activityHistory || [])].slice(0, 120)
+}
+
+function pushChildContent(child, action, details = {}) {
+  if (!child) return
+  child.contentHistory = [createHistoryEntry('content', action, { targetChildId: child.id, targetChildName: child.name, ...details }), ...(child.contentHistory || [])].slice(0, 120)
+}
+
+function logChildAction(child, action, details = {}) {
+  pushChildActivity(child, action, details)
+  pushGlobalActivity(action, { targetChildId: child?.id || null, targetChildName: child?.name || null, ...details })
+}
+
+function logChildContent(child, action, details = {}) {
+  pushChildContent(child, action, details)
+  pushGlobalActivity(action, { targetChildId: child?.id || null, targetChildName: child?.name || null, ...details })
+}
+
 function awardReward(reward, sourceLabel) {
   const child = getCurrentChild()
   if (!child) return
@@ -543,6 +587,7 @@ function awardReward(reward, sourceLabel) {
   child.profile.gems += reward.gems || 0
   child.profile.xp += reward.xp || 0
 
+  logChildAction(child, 'reward-awarded', { sourceLabel, reward })
   addRecentReward(`${sourceLabel}: +${reward.coins || 0} coins, +${reward.stars || 0} stars, +${reward.xp || 0} XP${reward.gems ? `, +${reward.gems} gem` : ''}`)
 
   while (child.profile.xp >= child.profile.nextLevelXp) {
@@ -551,6 +596,7 @@ function awardReward(reward, sourceLabel) {
     child.profile.nextLevelXp += 25
     child.profile.coins += 15
     child.profile.stars += 5
+    logChildAction(child, 'level-up', { level: child.profile.level })
     addRecentReward('Level up bonus: +15 coins, +5 stars')
   }
 }
@@ -562,6 +608,7 @@ function completeQuestIfReady(questId) {
   if (!quest || quest.progress !== quest.total || quest.completed) return
 
   quest.completed = true
+  logChildAction(child, 'quest-completed', { questId, questTitle: quest.title })
   awardReward({ coins: quest.reward.coins || 0, stars: quest.reward.stars || 0, gems: quest.reward.gems || 0, xp: 12 }, `Quest complete: ${quest.title}`)
 }
 
@@ -571,6 +618,7 @@ function updateQuestProgress(questId, amount) {
   const quest = child.quests.find((entry) => entry.id === questId)
   if (!quest) return
   quest.progress = Math.min(quest.total, quest.progress + amount)
+  logChildAction(child, 'quest-progress-updated', { questId, progress: quest.progress, total: quest.total })
   completeQuestIfReady(questId)
 }
 
@@ -585,8 +633,14 @@ function createInboxMessage(type, text) {
 }
 
 function pushMessageToChild(child, type, text) {
-  child.inbox.unshift(createInboxMessage(type, text))
+  const message = createInboxMessage(type, text)
+  child.inbox.unshift(message)
   child.inbox = child.inbox.slice(0, 20)
+  logChildContent(child, 'inbox-message', {
+    messageType: type,
+    text,
+    messageId: message.id,
+  })
 }
 
 function sendAdminNotice() {
@@ -602,6 +656,7 @@ function sendAdminNotice() {
   }
 
   pushMessageToChild(target, 'notice', message)
+  logChildAction(target, 'admin-notice-sent', { text: message })
   state.lastResult = `Notice sent to ${target.name}.`
   saveState()
   render()
@@ -620,6 +675,7 @@ function sendDirectMessage() {
   }
 
   pushMessageToChild(target, 'message', message)
+  logChildAction(target, 'direct-message-sent', { text: message })
   state.lastResult = `Message sent to ${target.name}.`
   saveState()
   render()
@@ -634,7 +690,11 @@ function sendSystemAnnouncement() {
     return
   }
 
-  state.childProfiles.forEach((child) => pushMessageToChild(child, 'announcement', message))
+  state.childProfiles.forEach((child) => {
+    pushMessageToChild(child, 'announcement', message)
+    pushChildActivity(child, 'system-announcement-received', { text: message })
+  })
+  pushGlobalActivity('system-announcement-sent', { text: message, audienceSize: state.childProfiles.length })
   state.lastResult = 'System announcement sent to all profiles.'
   saveState()
   render()
@@ -652,7 +712,9 @@ function saveModerationNote() {
     return
   }
 
+  const previousNote = target.moderationNote || ''
   target.moderationNote = note
+  logChildAction(target, 'moderation-note-updated', { previousNote, note })
   state.lastResult = note ? `Saved moderation note for ${target.name}.` : `Cleared moderation note for ${target.name}.`
   saveState()
   render()
@@ -664,6 +726,7 @@ function markInboxRead(messageId) {
   const msg = child.inbox.find((entry) => entry.id === messageId)
   if (!msg) return
   msg.read = true
+  logChildAction(child, 'inbox-message-read', { messageId, messageType: msg.type, text: msg.text })
   saveState()
   render()
 }
@@ -731,6 +794,8 @@ function sendFriendRequest(targetId) {
 
   child.social.outgoingRequests.push(targetId)
   target.social.incomingRequests.push(child.id)
+  logChildAction(child, 'friend-request-sent', { otherChildId: target.id, otherChildName: target.name })
+  pushChildActivity(target, 'friend-request-received', { otherChildId: child.id, otherChildName: child.name })
   syncSocialLists()
   state.lastResult = `Friend request sent to ${target.name}.`
   saveState()
@@ -744,6 +809,8 @@ function cancelFriendRequest(targetId) {
 
   child.social.outgoingRequests = child.social.outgoingRequests.filter((id) => id !== targetId)
   target.social.incomingRequests = target.social.incomingRequests.filter((id) => id !== child.id)
+  logChildAction(child, 'friend-request-cancelled', { otherChildId: target.id, otherChildName: target.name })
+  pushChildActivity(target, 'friend-request-cancelled-by-sender', { otherChildId: child.id, otherChildName: child.name })
   syncSocialLists()
   state.lastResult = `Cancelled request to ${target.name}.`
   saveState()
@@ -761,6 +828,8 @@ function acceptFriendRequest(senderId) {
   if (!child.social.friends.includes(senderId)) child.social.friends.push(senderId)
   if (!sender.social.friends.includes(child.id)) sender.social.friends.push(child.id)
 
+  logChildAction(child, 'friend-request-accepted', { otherChildId: sender.id, otherChildName: sender.name })
+  pushChildActivity(sender, 'friend-request-accepted', { otherChildId: child.id, otherChildName: child.name })
   syncSocialLists()
   state.lastResult = `You and ${sender.name} are now friends!`
   saveState()
@@ -774,6 +843,8 @@ function rejectFriendRequest(senderId) {
 
   child.social.incomingRequests = child.social.incomingRequests.filter((id) => id !== senderId)
   sender.social.outgoingRequests = sender.social.outgoingRequests.filter((id) => id !== child.id)
+  logChildAction(child, 'friend-request-rejected', { otherChildId: sender.id, otherChildName: sender.name })
+  pushChildActivity(sender, 'friend-request-rejected', { otherChildId: child.id, otherChildName: child.name })
   syncSocialLists()
   state.lastResult = `Rejected ${sender.name}'s friend request.`
   saveState()
@@ -787,6 +858,8 @@ function unfriendChild(friendId) {
 
   child.social.friends = child.social.friends.filter((id) => id !== friendId)
   friend.social.friends = friend.social.friends.filter((id) => id !== child.id)
+  logChildAction(child, 'friend-removed', { otherChildId: friend.id, otherChildName: friend.name })
+  pushChildActivity(friend, 'friend-removed', { otherChildId: child.id, otherChildName: child.name })
   syncSocialLists()
   state.lastResult = `You are no longer friends with ${friend.name}.`
   saveState()
@@ -800,6 +873,14 @@ function answerPuzzle(option) {
   const puzzle = child.currentPuzzle
   const correct = option === puzzle.answer
   child.profile.totalAnswers += 1
+
+  logChildContent(child, 'puzzle-answered', {
+    puzzleType: puzzle.type,
+    prompt: puzzle.prompt,
+    selectedOption: option,
+    correctAnswer: puzzle.answer,
+    correct,
+  })
 
   if (correct) {
     child.profile.correctAnswers += 1
@@ -826,6 +907,7 @@ function collectCoinIfPresent() {
   if (!coin) return
 
   coin.collected = true
+  logChildContent(child, 'coin-collected', { coinId: coin.id, lane: coin.lane, x: coin.x })
   awardReward({ coins: 4, stars: 1, xp: 3, gems: 0 }, 'Coin collected')
   state.lastResult = 'You grabbed a coin!'
 }
@@ -850,6 +932,7 @@ function checkFinish() {
     gems: collectedCoins >= 3 ? 1 : 0,
   }
 
+  logChildContent(child, 'adventure-complete', { collectedCoins, reward })
   awardReward(reward, 'Adventure complete')
   updateQuestProgress('play', 100)
   state.lastResult = `Treasure reached! You collected ${collectedCoins} coins on the path.`
@@ -865,8 +948,10 @@ function movePlayer(deltaX, deltaLane = 0) {
 
   child.game.position = { x: nextX, lane: nextLane }
   child.game.steps += 1
+  logChildContent(child, 'game-move', { x: nextX, lane: nextLane, steps: child.game.steps })
 
   if (hitObstacle()) {
+    logChildContent(child, 'obstacle-hit', { x: nextX, lane: nextLane })
     state.lastResult = 'Oops! You bumped into an obstacle. Back to the start.'
     resetMiniGame()
     saveState()
@@ -924,6 +1009,7 @@ function purchaseItem(item) {
 
   child.profile.coins -= item.cost
   child.unlockedItems.push(item.id)
+  logChildContent(child, 'shop-purchase', { itemId: item.id, itemName: item.name, cost: item.cost })
   addRecentReward(`Unlocked ${item.name}`)
   state.lastResult = `Unlocked ${item.name}!`
   saveState()
@@ -934,6 +1020,7 @@ function equipItem(type, itemId) {
   const child = getCurrentChild()
   if (!child || childIsRestricted(child) || !child.unlockedItems.includes(itemId)) return
   child.equipped[type] = itemId
+  logChildContent(child, 'item-equipped', { equipType: type, itemId, itemName: findItemById(itemId)?.name || itemId })
   state.lastResult = `Equipped ${findItemById(itemId)?.name}!`
   saveState()
   render()
@@ -953,7 +1040,10 @@ function resetProfile(childId) {
   fresh.isOwner = old.isOwner || false
   fresh.moderationNote = old.moderationNote || ''
   fresh.inbox = old.inbox || []
+  fresh.contentHistory = old.contentHistory || []
+  fresh.activityHistory = old.activityHistory || []
   state.childProfiles[childIndex] = fresh
+  logChildAction(fresh, 'profile-reset', { previousProfileName: old.name })
   if (state.currentChildId === childId) normalizeCurrentChild()
   syncSocialLists()
   state.lastResult = `Reset profile for ${old.name}.`
@@ -972,6 +1062,7 @@ function removeProfile(childId) {
     entry.social.outgoingRequests = entry.social.outgoingRequests.filter((id) => id !== childId)
   })
 
+  logChildAction(child, 'profile-deleted', { deletedProfileName: child.name })
   state.childProfiles = state.childProfiles.filter((entry) => entry.id !== childId)
   ensureCurrentChild()
   syncSocialLists()
@@ -1006,6 +1097,7 @@ function createChildProfileFromForm(prefix = 'public') {
   lockAllProfilesExcept(child.id)
   state.childProfiles.push(child)
   state.currentChildId = child.id
+  logChildAction(child, 'profile-created', { age, difficulty })
   syncSocialLists()
   state.lastResult = `Created profile for ${name}.`
   saveState()
@@ -1025,6 +1117,7 @@ function switchChildProfile(childId) {
   ensureCurrentChild()
   ensurePuzzle()
   normalizeCurrentChild()
+  logChildAction(child, 'profile-switched-to')
   state.lastResult = childNeedsLogin(child) ? `Enter ${child.name}'s passcode to continue.` : 'Switched profile.'
   saveState()
   render()
@@ -1033,12 +1126,14 @@ function switchChildProfile(childId) {
 function setChildStatus(childId, status) {
   const child = state.childProfiles.find((entry) => entry.id === childId)
   if (!child) return
+  const previousStatus = child.status
   child.status = status
   if (status !== 'banned') {
     child.banReason = ''
     child.banExpiresAt = null
   }
   if (status === 'banned' && state.currentChildId === childId) ensureCurrentChild()
+  logChildAction(child, 'status-updated', { previousStatus, status })
   state.lastResult = `${child.name} is now ${status}.`
   saveState()
   render()
@@ -1059,6 +1154,7 @@ function toggleOwnerProfile() {
     child.isOwner = child.id === childId
   })
 
+  logChildAction(target, 'owner-mode-granted')
   state.lastResult = `${target.name} is now the owner profile.`
   saveState()
   render()
@@ -1091,6 +1187,7 @@ function banChild(childId) {
 
   syncSocialLists()
   if (state.currentChildId === childId) ensureCurrentChild()
+  logChildAction(child, 'child-banned', { reason: child.banReason, durationMinutes, expiresAt })
   state.lastResult = durationMinutes > 0
     ? `${child.name} was banned for ${durationMinutes} minutes.`
     : `${child.name} was banned.`
@@ -1106,6 +1203,7 @@ function unbanChild(childId) {
   child.banExpiresAt = null
   child.auth.unlocked = child.auth.passcode ? false : true
   if (!state.currentChildId) state.currentChildId = child.id
+  logChildAction(child, 'child-unbanned')
   state.lastResult = `${child.name} was unbanned.`
   saveState()
   render()
@@ -1125,12 +1223,14 @@ function loginCurrentChild() {
   if (input === child.auth.passcode) {
     lockAllProfilesExcept(child.id)
     child.auth.unlocked = true
+    logChildAction(child, 'profile-login-success')
     state.lastResult = `${child.name} is logged in.`
     saveState()
     render()
     return
   }
 
+  logChildAction(child, 'profile-login-failed')
   state.lastResult = 'Wrong profile passcode.'
   render()
 }
@@ -1139,6 +1239,7 @@ function logoutCurrentChild() {
   const child = getCurrentChild()
   if (!child || !child.auth.passcode) return
   child.auth.unlocked = false
+  logChildAction(child, 'profile-logged-out')
   state.lastResult = `${child.name} logged out.`
   saveState()
   render()
@@ -1153,6 +1254,7 @@ function setCurrentChildPasscode() {
 
   child.auth.passcode = value
   child.auth.unlocked = value ? false : true
+  logChildAction(child, 'profile-passcode-updated', { hasPasscode: Boolean(value) })
   state.lastResult = value ? `Passcode set for ${child.name}.` : `Passcode removed for ${child.name}.`
   saveState()
   render()
@@ -1190,6 +1292,7 @@ function changeAdminPasscode() {
   }
 
   state.admin.passcode = next
+  pushGlobalActivity('admin-passcode-changed')
   state.lastResult = 'Admin passcode changed.'
   saveState()
   render()
@@ -1198,7 +1301,9 @@ function changeAdminPasscode() {
 function grantRewardToChild(childId, type, amount) {
   const child = state.childProfiles.find((entry) => entry.id === childId)
   if (!child) return
+  const before = child.profile[type]
   child.profile[type] += amount
+  logChildAction(child, 'admin-reward-granted', { rewardType: type, amount, before, after: child.profile[type] })
   state.lastResult = `Gave ${amount} ${type} to ${child.name}.`
   saveState()
   render()
@@ -1264,6 +1369,7 @@ function unlockAdmin() {
   if (input === state.admin.passcode) {
     state.admin.unlocked = true
     state.admin.showPanel = true
+    pushGlobalActivity('admin-panel-unlocked')
     state.lastResult = 'Admin panel unlocked.'
     resetAdminInactivityTimer()
   } else {
@@ -1356,8 +1462,35 @@ function renderProfileSelector() {
   `
 }
 
+function renderHistoryEntry(entry) {
+  const timestamp = new Date(entry.createdAt).toLocaleString()
+  const detailParts = []
+
+  if (entry.text) detailParts.push(`“${entry.text}”`)
+  if (entry.prompt) detailParts.push(`Prompt: ${entry.prompt}`)
+  if (entry.itemName) detailParts.push(`Item: ${entry.itemName}`)
+  if (entry.rewardType) detailParts.push(`Reward: ${entry.amount} ${entry.rewardType}`)
+  if (entry.note && entry.note !== entry.text) detailParts.push(`Note: ${entry.note}`)
+  if (entry.reason) detailParts.push(`Reason: ${entry.reason}`)
+  if (entry.status) detailParts.push(`Status: ${entry.status}`)
+  if (entry.otherChildName) detailParts.push(`Other player: ${entry.otherChildName}`)
+
+  return `
+    <div class="history-item ${entry.kind}">
+      <div class="history-top">
+        <strong>${entry.action}</strong>
+        <span>${timestamp}</span>
+      </div>
+      <div class="history-meta">By ${entry.actorName || 'System'}</div>
+      ${detailParts.length ? `<div class="history-details">${detailParts.join(' • ')}</div>` : ''}
+    </div>
+  `
+}
+
 function renderInbox(child) {
   const inbox = child.inbox || []
+  const contentHistory = child.contentHistory || []
+  const activityHistory = child.activityHistory || []
 
   return `
     <section class="card rewards-preview">
@@ -1371,6 +1504,16 @@ function renderInbox(child) {
               </div>
             `).join('')
           : '<div class="recent-item">No messages yet.</div>'}
+      </div>
+
+      <h3>Saved content</h3>
+      <div class="history-list">
+        ${contentHistory.length ? contentHistory.slice(0, 8).map(renderHistoryEntry).join('') : '<div class="recent-item">No saved content yet.</div>'}
+      </div>
+
+      <h3>Activity history</h3>
+      <div class="history-list">
+        ${activityHistory.length ? activityHistory.slice(0, 8).map(renderHistoryEntry).join('') : '<div class="recent-item">No activity saved yet.</div>'}
       </div>
     </section>
   `
@@ -1609,6 +1752,7 @@ function renderFriends() {
                         <div class="profile-avatar small">${findItemById(entry.equipped?.skin)?.icon || '🙂'}</div>
                         <div>
                           <strong>${entry.name}</strong>
+
                           <div>Level ${entry.profile.level} • Age ${entry.settings.age}</div>
                         </div>
                       </div>
@@ -1967,9 +2111,16 @@ function renderAdminPanel() {
       ${child ? `
         <div class="admin-section">
           <h3>Current child: ${child.name}</h3>
-          <div class="admin-note">Status: ${child.status}. Owner mode gates admin access. Notices, messages, announcements, and moderation notes are local-only inbox features.</div>
+          <div class="admin-note">Status: ${child.status}. Owner mode gates admin access. Notices, messages, announcements, moderation notes, and player activity are now saved in local history logs.</div>
         </div>
       ` : ''}
+
+      <div class="admin-section">
+        <h3>Global audit log</h3>
+        <div class="history-list">
+          ${(state.activityLog || []).length ? state.activityLog.slice(0, 12).map(renderHistoryEntry).join('') : '<div class="recent-item">No audit entries yet.</div>'}
+        </div>
+      </div>
     </section>
   `
 }
@@ -2130,6 +2281,7 @@ function bindEvents() {
     if (!child || !state.admin.unlocked) return
     child.settings.age = Number(event.target.value)
     child.currentPuzzle = null
+    logChildAction(child, 'age-setting-updated', { age: child.settings.age })
     ensurePuzzle()
     saveState()
     render()
@@ -2140,6 +2292,7 @@ function bindEvents() {
     if (!child || !state.admin.unlocked) return
     child.settings.difficulty = event.target.value
     child.currentPuzzle = null
+    logChildAction(child, 'difficulty-setting-updated', { difficulty: child.settings.difficulty })
     ensurePuzzle()
     saveState()
     render()
@@ -2149,6 +2302,7 @@ function bindEvents() {
     const child = getCurrentChild()
     if (!child || !state.admin.unlocked) return
     child.settings.timeLimit = Number(event.target.value)
+    logChildAction(child, 'time-limit-updated', { timeLimit: child.settings.timeLimit })
     saveState()
     render()
   })
@@ -2157,6 +2311,7 @@ function bindEvents() {
     const child = getCurrentChild()
     if (!child || !state.admin.unlocked) return
     child.settings.sound = !child.settings.sound
+    logChildAction(child, 'sound-setting-toggled', { sound: child.settings.sound })
     saveState()
     render()
   })
@@ -2165,6 +2320,7 @@ function bindEvents() {
     const child = getCurrentChild()
     if (!child || !state.admin.unlocked) return
     child.settings.safeLocalMode = !child.settings.safeLocalMode
+    logChildAction(child, 'safe-mode-toggled', { safeLocalMode: child.settings.safeLocalMode })
     saveState()
     render()
   })
