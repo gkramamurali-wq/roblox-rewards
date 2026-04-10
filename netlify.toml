@@ -1,0 +1,4 @@
+[build]
+  base = "roblox-rewards"
+  command = "npm run build"
+  publish = "dist"
